@@ -59,15 +59,15 @@ class Game:
 
         while True:
             try:
-                insert_type = int(input("What are you going to guess? Plese type 1 for letter, 2 for word: "))
+                insert_type = int(input("What are you going to guess? Please type 1 for letter, 2 for word: "))
                 print()
                 if insert_type != 1 and insert_type != 2:
-                    print("Invalid imput.\n")
+                    print("Invalid input.\n")
                 else:
                     break
             except ValueError:
                 print()
-                print("Invalid imput.\n")
+                print("Invalid input.\n")
 
         if insert_type == 1:
             return self.guess_letter(self.players[turn])
