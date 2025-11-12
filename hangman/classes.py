@@ -290,11 +290,11 @@ class Game:
         if times_guessed == 0:
             self.view.display(f"Sorry, the letter '{raw_letter}' is not in the word.\n")
             eliminated = player.lose_health(self.view)
+            self.view.show_word(self.unknown_word)
             if eliminated:
                 self.remaining_players -= 1
                 self.view.display(f"{player.name} has been eliminated.\n")
-
-            self.view.show_word(self.unknown_word)
+            
             self.view.pause()
             return self._game_over()
 
@@ -310,6 +310,7 @@ class Game:
             f"Well done! The letter '{raw_letter}' appears {times_guessed} time"
             f"{'s' if times_guessed > 1 else ''} in the word.\n"
         )
+        player.show_health(self.view)
         self.view.show_word(self.unknown_word)
 
         while True:
@@ -336,11 +337,11 @@ class Game:
         if guess != self.word:
             self.view.display(f"Sorry, '{guess}' is not the correct word.\n")
             eliminated = player.lose_health(self.view)
+            self.view.show_word(self.unknown_word)
             if eliminated:
                 self.remaining_players -= 1
                 self.view.display(f"{player.name} has been eliminated.\n")
-
-            self.view.show_word(self.unknown_word)
+            
             self.view.pause()
             return self._game_over()
 
