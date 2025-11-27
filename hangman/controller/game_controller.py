@@ -110,7 +110,7 @@ class GameController:
                     winner_player = self.game.get_player(winner_index)
             
             # Offer full-word guess (only if letter guess was correct and game is not already won)
-            if insert_type == 1 and result.get("correct"):
+            if  insert_type == 1 and result.get("correct") and not result.get("game_won"):
                 while True:
                     choice = self.view.prompt("Do you want to guess the word? (Y/N): ").strip().upper()
                     if choice not in ("Y", "N"):
