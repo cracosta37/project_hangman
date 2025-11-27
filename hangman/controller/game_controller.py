@@ -133,7 +133,9 @@ class GameController:
         # ==================================================================
 
         if winner_player is not None:
+            self.view.clear()
             self.view.display(f"Congratulations, {winner_player.name}! You won!\n")
+            self.view.show_health(winner_player)
             self.view.show_word(self.game.get_visible_word())
 
         elif self.game.remaining_spaces == 0:
@@ -175,6 +177,8 @@ class GameController:
 
         # Retrieve player **once**
         player = self.game.get_player(player_index)
+
+        self.view.clear()
 
         # Incorrect guess
         if not result.get("correct"):
@@ -232,6 +236,8 @@ class GameController:
         # Retrieve the player exactly once
         player = self.game.get_player(player_index)
 
+        self.view.clear()
+
         # Incorrect guess
         if not result.get("correct"):
             self.view.display(f"Sorry, '{guess_out}' is not the correct word.\n")
@@ -244,11 +250,13 @@ class GameController:
             self.view.pause()
             return result
 
-        # Correct guess → immediate win display
+        # Correct guess
         self.view.clear()
-        self.view.display(f"Congratulations, {player.name}! You won!\n")
+        self.view.display(f"Well done! The word {guess_out} is the correct word.\n")
         self.view.show_health(player)
         self.view.show_word(self.game.get_visible_word())
+        
+        self.view.pause()
 
         return result
 
