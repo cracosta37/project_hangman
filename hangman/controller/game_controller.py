@@ -201,7 +201,6 @@ class GameController:
         self.view.show_health(player)
         self.view.show_word(self.game.get_visible_word())
        
-        self.view.pause()
         return result
 
     # ======================================================================
@@ -252,10 +251,10 @@ class GameController:
 
         # Correct guess
         self.view.clear()
-        self.view.display(f"Well done! The word {guess_out} is the correct word.\n")
+        self.view.display(f"Well done! The word '{guess_out}' is the correct word.\n")
         self.view.show_health(player)
         self.view.show_word(self.game.get_visible_word())
-        
+
         self.view.pause()
 
         return result
