@@ -62,6 +62,38 @@ class Game:
         self.unknown_word = ["_" if ch.isalpha() else ch for ch in normalized]
         self.remaining_spaces = sum(ch == "_" for ch in self.unknown_word)
         return {"ok": True}
+    
+    # ---------------------------
+    # Round reset
+    # ---------------------------
+
+    def reset_for_new_round(self, new_word: str) -> dict:
+        """
+        Reset all game state except the existing players.
+        Players keep their names; their health is restored.
+        """
+        # Normalize letters depending on the original setting
+        if self.normalize_input:
+            base_letters = string.ascii_uppercase
+        else:
+            base_letters = string.ascii_uppercase + "ÑÁÉÍÓÚÜÇ"
+
+        # Reset remaining letters
+        self.remaining_letters = set(base_letters)
+
+        # Reset the chosen word
+        result = self.set_word(new_word)
+        if not result.get("ok"):
+            return result
+
+        # Reset each player's health
+        for p in self.players:
+            p.health = p.max_health
+
+        # Reset counters dependent on players
+        self.remaining_players = self.n_players
+
+        return {"ok": True}
 
     # ---------------------------
     # Players

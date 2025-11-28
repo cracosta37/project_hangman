@@ -146,7 +146,7 @@ class GameController:
         else:
             self.view.display("All players have been eliminated. Game over.\n")
 
-        self.view.pause("Press Enter to exit...")
+        self.view.pause("Press Enter to continue...")
 
     # ======================================================================
     # LETTER HANDLER
@@ -265,5 +265,27 @@ class GameController:
     # ======================================================================
 
     def start(self):
+        # Full setup including player names
         self.setup_game()
-        self.run_game_loop()
+
+        while True:
+            self.run_game_loop()
+
+            # Ask if the user wants another round
+            while True:
+                choice = self.view.prompt("Start a new game with the same players? (Y/N): ").strip().upper()
+                if choice in ("Y", "N"):
+                    break
+                self.view.display("Invalid input. Please choose Y or N.\n")
+
+            if choice == "N":
+                self.view.pause("Press Enter to exit...")
+                break
+
+            # Reset game with a new word
+            while True:
+                raw_word = self.view.prompt_hidden("Please insert the new word: ")
+                result = self.game.reset_for_new_round(raw_word)
+                if result.get("ok"):
+                    break
+                self.view.display(result.get("error", "Invalid word.") + "\n")
