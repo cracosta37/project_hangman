@@ -27,11 +27,11 @@ class GameController:
 
         # Word setup
         while True:
-            raw_word = self.view.prompt_hidden("Please insert the word: ")
+            raw_word = self.view.prompt_hidden("Please insert the word or phrase: ")
             result = self.game.set_word(raw_word)
             if result.get("ok"):
                 break
-            self.view.display(result.get("error", "Invalid word.") + "\n")
+            self.view.display(result.get("error", "Invalid word or phrase.") + "\n")
 
         # Players setup
         while True:
@@ -89,7 +89,8 @@ class GameController:
             # Guess type selection
             while True:
                 try:
-                    insert_type = int(self.view.prompt("Guess type: 1 for letter, 2 for word: "))
+                    label = self.game.word_label()
+                    insert_type = int(self.view.prompt(f"Guess type: 1 for letter, 2 for {label}: "))
                     if insert_type not in (1, 2):
                         self.view.display("Invalid input. Please enter 1 or 2.\n")
                         continue
@@ -112,7 +113,8 @@ class GameController:
             # Offer full-word guess (only if letter guess was correct and game is not already won)
             if  insert_type == 1 and result.get("correct") and not result.get("game_won"):
                 while True:
-                    choice = self.view.prompt("Do you want to guess the word? (Y/N): ").strip().upper()
+                    label = self.game.word_label()
+                    choice = self.view.prompt(f"Do you want to guess the {label}? (Y/N): ").strip().upper()
                     if choice not in ("Y", "N"):
                         self.view.display("Invalid input. Please choose Y or N.\n")
                         continue
@@ -140,7 +142,8 @@ class GameController:
 
         elif self.game.remaining_spaces == 0:
             # Rare fallback
-            self.view.display("Game finished. The word was:\n")
+            label = self.game.word_label()
+            self.view.display(f"Game finished. The {label} was:\n")
             self.view.show_word(self.game.get_visible_word())
 
         else:
@@ -182,7 +185,8 @@ class GameController:
 
         # Incorrect guess
         if not result.get("correct"):
-            self.view.display(f"Sorry, the letter '{letter_out}' is not in the word.\n")
+            label = self.game.word_label()
+            self.view.display(f"Sorry, the letter '{letter_out}' is not in the {label}.\n")
             self.view.show_health(player)
             self.view.show_word(self.game.get_visible_word())
 
@@ -194,9 +198,10 @@ class GameController:
 
         # Correct guess
         times = result.get("times", 0)
+        label = self.game.word_label()
         self.view.display(
             f"Well done! The letter '{letter_out}' appears {times} time"
-            f"{'s' if times > 1 else ''} in the word.\n"
+            f"{'s' if times > 1 else ''} in the {label}.\n"
         )
         self.view.show_health(player)
         self.view.show_word(self.game.get_visible_word())
@@ -210,7 +215,8 @@ class GameController:
     def handle_word_guess(self, player_index: int):
         # Input + validation loop
         while True:
-            raw_guess = self.view.prompt("Please insert the word: ")
+            label = self.game.word_label()
+            raw_guess = self.view.prompt(f"Please insert the {label}: ")
 
             # Delegate validation and logic to the Model
             result = self.game.guess_word(player_index, raw_guess)
@@ -239,7 +245,8 @@ class GameController:
 
         # Incorrect guess
         if not result.get("correct"):
-            self.view.display(f"Sorry, '{guess_out}' is not the correct word.\n")
+            label = self.game.word_label()
+            self.view.display(f"Sorry, '{guess_out}' is not the correct {label}.\n")
             self.view.show_health(player)
             self.view.show_word(self.game.get_visible_word())
 
@@ -251,7 +258,8 @@ class GameController:
 
         # Correct guess
         self.view.clear()
-        self.view.display(f"Well done! The word '{guess_out}' is the correct word.\n")
+        label = self.game.word_label()
+        self.view.display(f"Well done! The {label} '{guess_out}' is the correct {label}.\n")
         self.view.show_health(player)
         self.view.show_word(self.game.get_visible_word())
 
@@ -284,8 +292,8 @@ class GameController:
 
             # Reset game with a new word
             while True:
-                raw_word = self.view.prompt_hidden("Please insert the new word: ")
+                raw_word = self.view.prompt_hidden("Please insert the new word or phrase: ")
                 result = self.game.reset_for_new_round(raw_word)
                 if result.get("ok"):
                     break
-                self.view.display(result.get("error", "Invalid word.") + "\n")
+                self.view.display(result.get("error", "Invalid word or phrase.") + "\n")

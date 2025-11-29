@@ -19,6 +19,7 @@ class Game:
         self.remaining_players: int = 0
         self.n_players: int = 0
         self.remaining_spaces: int = 0
+        self.is_phrase: bool = False
 
         if self.normalize_input:
             base_letters = string.ascii_uppercase
@@ -61,6 +62,7 @@ class Game:
         self.word = normalized
         self.unknown_word = ["_" if ch.isalpha() else ch for ch in normalized]
         self.remaining_spaces = sum(ch == "_" for ch in self.unknown_word)
+        self.is_phrase = (" " in word)
         return {"ok": True}
     
     # ---------------------------
@@ -244,6 +246,10 @@ class Game:
     # Helpers
     # ---------------------------
 
+    def word_label(self) -> str:
+        """Return 'word' or 'phrase' depending on whether the secret contains spaces."""
+        return "phrase" if self.is_phrase else "word"
+    
     def is_game_over(self) -> bool:
         return self.remaining_players <= 0 or self.remaining_spaces == 0
 
