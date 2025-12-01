@@ -21,6 +21,15 @@ class GameController:
             if response in ("Y", "N"):
                 return response == "Y"
             self.view.display("Invalid input. Please enter Y or N.\n")
+    
+    def choose_word_source(self) -> str:
+        while True:
+            choice = self.view.prompt(
+                "Select word source: 1 = manual (moderator), 2 = automatic (by difficulty): "
+            ).strip()
+            if choice in ("1", "2"):
+                return choice
+            self.view.display("Invalid input. Please enter 1 or 2.\n")
 
     def setup_game(self):
         normalize = self.choose_normalization()
