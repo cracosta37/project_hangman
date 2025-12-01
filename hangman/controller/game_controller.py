@@ -1,6 +1,7 @@
 from hangman.model.game import Game
 from hangman.view.console_view import ConsoleView
 from hangman import constants
+from hangman.word_bank import get_random_word
 
 
 class GameController:
