@@ -14,6 +14,10 @@ class GameController:
         self.view = view
         self.c = constants_module
         self.game = None
+    
+    # ==============================
+    # CONFIGURATION
+    # ==============================
 
     def choose_normalization(self) -> bool:
         while True:
@@ -39,6 +43,10 @@ class GameController:
             if diff in ("EASY", "MEDIUM", "HARD"):
                 return diff
             self.view.display("Invalid difficulty. Choose EASY, MEDIUM, or HARD.\n")
+    
+    # ==============================
+    # SETUP
+    # ==============================
 
     def setup_game(self):
         normalize = self.choose_normalization()
