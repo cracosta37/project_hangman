@@ -30,6 +30,15 @@ class GameController:
             if choice in ("1", "2"):
                 return choice
             self.view.display("Invalid input. Please enter 1 or 2.\n")
+    
+    def choose_difficulty(self) -> str:
+        while True:
+            diff = self.view.prompt(
+                "Select difficulty: EASY, MEDIUM, HARD: "
+            ).strip().upper()
+            if diff in ("EASY", "MEDIUM", "HARD"):
+                return diff
+            self.view.display("Invalid difficulty. Choose EASY, MEDIUM, or HARD.\n")
 
     def setup_game(self):
         normalize = self.choose_normalization()
