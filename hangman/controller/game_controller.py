@@ -44,13 +44,35 @@ class GameController:
         normalize = self.choose_normalization()
         self.game = Game(constants_module=self.c, normalize_input=normalize)
 
-        # Word setup
-        while True:
-            raw_word = self.view.prompt_hidden("Please insert the word or phrase: ")
-            result = self.game.set_word(raw_word)
-            if result.get("ok"):
-                break
-            self.view.display(result.get("error", "Invalid word or phrase.") + "\n")
+        # Word setup (manual or automatic)
+        source = self.choose_word_source()
+
+        if source == "1":
+            # Manual (current behavior)
+            while True:
+                raw_word = self.view.prompt_hidden("Please insert the word or phrase: ")
+                result = self.game.set_word(raw_word)
+                if result.get("ok"):
+                    break
+                self.view.display(result.get("error", "Invalid word or phrase.") + "\n")
+
+        else:
+            # Automatic (by difficulty)
+            difficulty = self.choose_difficulty()
+
+            while True:
+                try:
+                    selected = get_random_word(difficulty)
+                except ValueError as e:
+                    self.view.display(str(e) + "\n")
+                    difficulty = self.choose_difficulty()
+                    continue
+
+                result = self.game.set_word(selected)
+                if result.get("ok"):
+                    break
+
+            self.view.display("A word or phrase has been selected automatically.\n")
 
         # Players setup
         while True:
