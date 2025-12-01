@@ -331,10 +331,26 @@ class GameController:
                 self.view.pause("Press Enter to exit...")
                 break
 
-            # Reset game with a new word
-            while True:
-                raw_word = self.view.prompt_hidden("Please insert the new word or phrase: ")
-                result = self.game.reset_for_new_round(raw_word)
-                if result.get("ok"):
-                    break
-                self.view.display(result.get("error", "Invalid word or phrase.") + "\n")
+            # Reset game with a new word (ask again for source)
+            source = self.choose_word_source()
+
+            if source == "1":
+                while True:
+                    raw_word = self.view.prompt_hidden("Please insert the new word or phrase: ")
+                    result = self.game.reset_for_new_round(raw_word)
+                    if result.get("ok"):
+                        break
+                    self.view.display(result.get("error", "Invalid word or phrase.") + "\n")
+            else:
+                difficulty = self.choose_difficulty()
+                while True:
+                    try:
+                        selected = get_random_word(difficulty)
+                    except ValueError as e:
+                        self.view.display(str(e) + "\n")
+                        difficulty = self.choose_difficulty()
+                        continue
+
+                    result = self.game.reset_for_new_round(selected)
+                    if result.get("ok"):
+                        break
