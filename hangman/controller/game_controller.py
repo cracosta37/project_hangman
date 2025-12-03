@@ -1,7 +1,7 @@
 from hangman.model.game import Game
 from hangman.view.console_view import ConsoleView
+from hangman.services.word_repository import WordRepository
 from hangman import constants
-from hangman.word_bank import get_random_word
 
 
 class GameController:
@@ -14,6 +14,8 @@ class GameController:
         self.view = view
         self.c = constants_module
         self.game = None
+
+        self.word_repo = WordRepository("hangman/data/word_bank.json")
     
     # ==============================
     # CONFIGURATION
@@ -71,7 +73,7 @@ class GameController:
 
             while True:
                 try:
-                    selected = get_random_word(difficulty)
+                    selected = self.word_repo.get_by_difficulty(difficulty)
                 except ValueError as e:
                     self.view.display(str(e) + "\n")
                     difficulty = self.choose_difficulty()
@@ -342,6 +344,9 @@ class GameController:
                 self.view.clear()
                 break
 
+            # Reset word session cache (NO-REPEAT MODE)
+            self.word_repo.reset_session()
+            
             # Reset game with a new word (ask again for source)
             source = self.choose_word_source()
 
@@ -356,7 +361,7 @@ class GameController:
                 difficulty = self.choose_difficulty()
                 while True:
                     try:
-                        selected = get_random_word(difficulty)
+                        selected = self.word_repo.get_by_difficulty(difficulty)
                     except ValueError as e:
                         self.view.display(str(e) + "\n")
                         difficulty = self.choose_difficulty()

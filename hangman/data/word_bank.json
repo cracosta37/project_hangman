@@ -1,0 +1,23 @@
+{
+  "EASY": [
+    "dog",
+    "tree",
+    "sun",
+    "house",
+    "python"
+  ],
+  "MEDIUM": [
+    "software",
+    "laptop",
+    "computer",
+    "database",
+    "notebook"
+  ],
+  "HARD": [
+    "artificial intelligence",
+    "distributed systems",
+    "object oriented programming",
+    "neural networks",
+    "microservices architecture"
+  ]
+}
