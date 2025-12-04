@@ -22,6 +22,7 @@ class ConsoleView(View):
         try:
             return input(message)
         except (KeyboardInterrupt, EOFError):
+            self.clear()
             print("\nGame interrupted. Exiting safely.\n")
             exit(0)
 
@@ -29,6 +30,7 @@ class ConsoleView(View):
         try:
             return getpass.getpass(prompt=message)
         except (KeyboardInterrupt, EOFError):
+            self.clear()
             print("\nGame interrupted. Exiting safely.\n")
             exit(0)
 
@@ -36,6 +38,7 @@ class ConsoleView(View):
         try:
             input(message)
         except (KeyboardInterrupt, EOFError):
+            self.clear()
             print("\nGame interrupted. Exiting safely.\n")
             exit(0)
 
