@@ -11,7 +11,7 @@ class WordRepository:
     """
 
     def __init__(self, file_path: str):
-        self.file_path = Path(file_path)
+        self.file_path = Path(file_path).resolve()
         self.words: Dict[str, List[str]] = {}
         self.used_words: Set[str] = set()
 

@@ -3,6 +3,10 @@ from hangman.view.console_view import ConsoleView
 from hangman.services.word_repository import WordRepository
 from hangman import constants
 
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
 
 class GameController:
     """
@@ -15,7 +19,7 @@ class GameController:
         self.c = constants_module
         self.game = None
 
-        self.word_repo = WordRepository("hangman/data/word_bank.json")
+        self.word_repo = WordRepository(BASE_DIR / "data" / "word_bank.json")
     
     # ==============================
     # CONFIGURATION
