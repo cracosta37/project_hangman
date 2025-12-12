@@ -186,11 +186,10 @@ class WordRepository:
             raise ValueError(f"No words available for difficulty: {key}")
 
         # Filter out already used (internal normalized forms)
-        available = []
-        for candidate in bucket:
-            normalized = self._normalize_for_internal(candidate)
-            if normalized not in self.used_words:
-                available.append(candidate)
+        available = [
+            w for w in bucket
+            if self._normalize_for_internal(w) not in self.used_words
+        ]
 
         if not available:
             # No unused words remaining in this bucket. Raise a descriptive error.
