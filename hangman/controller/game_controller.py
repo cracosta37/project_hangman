@@ -50,6 +50,9 @@ class GameController:
                 return diff
             self.view.display("Invalid difficulty. Choose EASY, MEDIUM, or HARD.\n")
     
+    def _is_exhaustion_error(self, error: ValueError) -> bool:
+        return "No unused words remaining" in str(error)
+    
     # ==============================
     # SETUP
     # ==============================
@@ -363,14 +366,41 @@ class GameController:
                     self.view.display(result.get("error", "Invalid word or phrase.") + "\n")
             else:
                 difficulty = self.choose_difficulty()
+
                 while True:
                     try:
                         selected = self.word_repo.get_by_difficulty(difficulty)
-                    except ValueError as e:
-                        self.view.display(str(e) + "\n")
-                        difficulty = self.choose_difficulty()
-                        continue
 
+                    except ValueError as e:
+                        if self._is_exhaustion_error(e):
+                            self.view.display(
+                                f"{e}\n"
+                                "Recovery options:\n"
+                                "1) Reset word history for this session\n"
+                                "2) Choose a different difficulty\n"
+                                "3) Cancel round\n"
+                            )
+
+                            choice = self.view.get_choice(["1", "2", "3"])
+
+                            if choice == "1":
+                                self.word_repo.reset_session()
+                                continue
+
+                            if choice == "2":
+                                difficulty = self.choose_difficulty()
+                                continue
+
+                            # choice == "3"
+                            break  # Exit round safely
+
+                        else:
+                            # Non-exhaustion error (e.g., invalid difficulty)
+                            self.view.display(str(e) + "\n")
+                            difficulty = self.choose_difficulty()
+                            continue
+
+                    # Successful selection
                     result = self.game.reset_for_new_round(selected)
                     if result.get("ok"):
                         break
