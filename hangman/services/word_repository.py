@@ -158,7 +158,7 @@ class WordRepository:
         seen: Set[str] = set()
         out: List[str] = []
         for it in items:
-            key = it.strip().lower()
+            key = WordRepository._normalize_for_internal(it)
             if key in seen:
                 continue
             seen.add(key)
