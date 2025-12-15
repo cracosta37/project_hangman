@@ -328,7 +328,7 @@ class GameController:
 
 
     # ======================================================================
-    # RUN
+    # APPLICATION LIFECYCLE
     # ======================================================================
 
     def start(self):
@@ -347,9 +347,7 @@ class GameController:
                 self.view.display("Invalid input. Please choose Y or N.\n")
 
             if choice == "N":
-                self.view.pause("Press Enter to exit...")
-                self.view.clear()
-                break
+                return self.exit_game()
 
             # Reset word session cache (NO-REPEAT MODE)
             self.word_repo.reset_session()
@@ -378,7 +376,7 @@ class GameController:
                                 "Recovery options:\n"
                                 "1) Reset word history for this session\n"
                                 "2) Choose a different difficulty\n"
-                                "3) Cancel round\n"
+                                "3) Exit game\n"
                             )
 
                             choice = self.view.get_choice(["1", "2", "3"])
@@ -392,7 +390,7 @@ class GameController:
                                 continue
 
                             # choice == "3"
-                            break  # Exit round safely
+                            return self.exit_game() # Exit game entirely (leave start())
 
                         else:
                             # Non-exhaustion error (e.g., invalid difficulty)
@@ -404,3 +402,7 @@ class GameController:
                     result = self.game.reset_for_new_round(selected)
                     if result.get("ok"):
                         break
+    
+    def exit_game(self) -> None:
+        self.view.pause("Press Enter to exit...")
+        self.view.clear()
