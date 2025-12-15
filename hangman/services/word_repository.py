@@ -65,13 +65,19 @@ class WordRepository:
                 for item in values:
                     validated = self._validate_and_clean_entry(item)
                     if validated is not None:
-                        self.words[key].append(validated)
+                        # Check for the number of alphabetic letters
+                        min_letters = 2
+                        if sum(1 for ch in validated if ch.isalpha()) >= min_letters:
+                            self.words[key].append(validated)
         elif isinstance(data, list):
             # Treat an unkeyed list as MEDIUM default
             for item in data:
                 validated = self._validate_and_clean_entry(item)
                 if validated is not None:
-                    self.words["MEDIUM"].append(validated)
+                    # Check for the number of alphabetic letters
+                    min_letters = 2
+                    if sum(1 for ch in validated if ch.isalpha()) >= min_letters:
+                        self.words["MEDIUM"].append(validated)
         else:
             raise TypeError("Word bank root must be either an object (dict) or an array (list).")
 
