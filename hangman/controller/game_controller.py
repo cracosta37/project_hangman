@@ -50,6 +50,15 @@ class GameController:
                 return diff
             self.view.display("Invalid difficulty. Choose EASY, MEDIUM, or HARD.\n")
     
+    def choose_reset_session(self) -> bool:
+        while True:
+            choice = self.view.prompt(
+                "Reset word history for the new game? (Y/N): "
+            ).strip().upper()
+            if choice in ("Y", "N"):
+                return choice == "Y"
+            self.view.display("Invalid input. Please choose Y or N.\n")
+    
     def _is_exhaustion_error(self, error: ValueError) -> bool:
         return "No unused words remaining" in str(error)
     
@@ -349,8 +358,10 @@ class GameController:
             if choice == "N":
                 return self.exit_game()
 
-            # Reset word session cache (NO-REPEAT MODE)
-            self.word_repo.reset_session()
+            # Optionally reset word session cache (NO-REPEAT MODE)
+            reset_words = self.choose_reset_session()
+            if reset_words:
+                self.word_repo.reset_session()
             
             # Reset game with a new word (ask again for source)
             source = self.choose_word_source()
