@@ -68,6 +68,7 @@ class GameController:
 
     def setup_game(self):
         self.view.clear()
+        self.view.show_title()     
         normalize = self.choose_normalization()
         self.game = Game(constants_module=self.c, normalize_input=normalize)
 
@@ -347,6 +348,7 @@ class GameController:
         while True:
             self.run_game_loop()
             self.view.clear()
+            self.view.show_title()
 
             # Ask if the user wants another round
             while True:

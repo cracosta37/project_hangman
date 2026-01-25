@@ -18,6 +18,10 @@ class ConsoleView(View):
     def display(self, message: str) -> None:
         print(message)
 
+    def show_title(self) -> None:
+        self.clear()
+        self.display("    *** HANGMAN ***\n\n")
+    
     def prompt(self, message: str) -> str:
         try:
             return input(message)

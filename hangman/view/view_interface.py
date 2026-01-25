@@ -7,6 +7,9 @@ class View:
     def display(self, message: str) -> None:
         raise NotImplementedError
 
+    def show_title(self) -> None:
+        raise NotImplementedError
+    
     def prompt(self, message: str) -> str:
         raise NotImplementedError
 
