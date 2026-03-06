@@ -33,3 +33,35 @@ def test_extended_alphabet_when_normalization_disabled(constants):
 
     assert "Ñ" in game.remaining_letters
     assert "Á" in game.remaining_letters
+
+def test_set_word_rejects_none(game):
+    result = game.set_word(None)
+
+    assert result["ok"] is False
+
+def test_set_word_rejects_empty_string(game):
+    result = game.set_word("   ")
+
+    assert result["ok"] is False
+
+def test_set_word_requires_at_least_two_letters(game):
+    result = game.set_word("A")
+
+    assert result["ok"] is False
+
+def test_set_word_rejects_invalid_characters(game):
+    result = game.set_word("HELLO!")
+
+    assert result["ok"] is False
+
+def test_set_word_initializes_masked_word(game):
+    result = game.set_word("HELLO")
+
+    assert result["ok"] is True
+    assert game.unknown_word == ["_", "_", "_", "_", "_"]
+
+def test_set_word_detects_phrase(game):
+    game.set_word("HELLO WORLD")
+
+    assert game.is_phrase is True
+    assert game.remaining_spaces == 10
