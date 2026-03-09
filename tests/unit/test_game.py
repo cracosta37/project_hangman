@@ -65,3 +65,27 @@ def test_set_word_detects_phrase(game):
 
     assert game.is_phrase is True
     assert game.remaining_spaces == 10
+
+def test_create_players_requires_nonempty_list(game):
+    result = game.create_players([])
+
+    assert result["ok"] is False
+
+def test_create_players_rejects_empty_names(game):
+    result = game.create_players(["Alice", ""])
+
+    assert result["ok"] is False
+
+def test_create_players_requires_unique_names(game):
+    result = game.create_players(["Alice", "alice"])
+
+    assert result["ok"] is False
+
+def test_create_players_success(game):
+    result = game.create_players(["Alice", "Bob"])
+
+    assert result["ok"] is True
+    assert len(game.players) == 2
+    assert game.remaining_players == 2
+    assert game.players[0].name == "Alice"
+    assert game.players[1].name == "Bob"
