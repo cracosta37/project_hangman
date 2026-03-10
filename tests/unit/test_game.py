@@ -23,16 +23,6 @@ def prepared_game(game_with_players):
     game_with_players.set_word("HELLO")
     return game_with_players
 
-@pytest.fixture
-def guessing_game(prepared_game):
-    game = prepared_game
-
-    game.display_word = ["_"] * len(game.secret_word)
-    game.remaining_spaces = len(game.secret_word)
-    game.guessed_letters = set()
-
-    return game
-
 def test_game_initializes_remaining_letters(game):
     assert len(game.remaining_letters) == 26
     assert "A" in game.remaining_letters
