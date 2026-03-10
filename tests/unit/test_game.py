@@ -23,6 +23,16 @@ def prepared_game(game_with_players):
     game_with_players.set_word("HELLO")
     return game_with_players
 
+@pytest.fixture
+def guessing_game(prepared_game):
+    game = prepared_game
+
+    game.display_word = ["_"] * len(game.secret_word)
+    game.remaining_spaces = len(game.secret_word)
+    game.guessed_letters = set()
+
+    return game
+
 def test_game_initializes_remaining_letters(game):
     assert len(game.remaining_letters) == 26
     assert "A" in game.remaining_letters
@@ -89,3 +99,35 @@ def test_create_players_success(game):
     assert game.remaining_players == 2
     assert game.players[0].name == "Alice"
     assert game.players[1].name == "Bob"
+
+def test_guess_letter_requires_single_character(guessing_game):
+    result = guessing_game.guess_letter("AB")
+
+    assert result["ok"] is False
+
+def test_guess_letter_rejects_repeated_guess(guessing_game):
+    guessing_game.guessed_letters.add("H")
+
+    result = guessing_game.guess_letter("H")
+
+    assert result["ok"] is False
+
+def test_guess_letter_reveals_correct_letters(guessing_game):
+    result = guessing_game.guess_letter("L")
+
+    assert result["ok"] is True
+    assert guessing_game.display_word == ["_", "_", "L", "L", "_"]
+    assert guessing_game.remaining_spaces == 3
+
+def test_guess_letter_wrong_guess_reduces_health(guessing_game):
+    player = guessing_game.players[0]
+    starting_health = player.health
+
+    guessing_game.guess_letter("Z")
+
+    assert player.health == starting_health - 1
+
+def test_guess_letter_tracks_guessed_letters(guessing_game):
+    guessing_game.guess_letter("H")
+
+    assert "H" in guessing_game.guessed_letters
