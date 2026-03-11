@@ -203,3 +203,67 @@ def test_guess_word_correct_guess(prepared_game):
     assert result["winner"] == 0
     assert prepared_game.remaining_spaces == 0
     assert prepared_game.unknown_word == list("HELLO")
+
+def test_word_label_returns_word(game):
+    game.set_word("HELLO")
+
+    assert game.word_label() == "word"
+
+def test_word_label_returns_phrase(game):
+    game.set_word("HELLO WORLD")
+
+    assert game.word_label() == "phrase"
+
+def test_is_game_over_false_when_game_active(prepared_game):
+    assert prepared_game.is_game_over() is False
+
+def test_is_game_over_when_no_players_remaining(prepared_game):
+    prepared_game.remaining_players = 0
+
+    assert prepared_game.is_game_over() is True
+
+def test_is_game_over_when_word_completed(prepared_game):
+    prepared_game.remaining_spaces = 0
+
+    assert prepared_game.is_game_over() is True
+
+def test_get_visible_word_returns_current_mask(prepared_game):
+    visible = prepared_game.get_visible_word()
+
+    assert visible == ["_", "_", "_", "_", "_"]
+
+def test_get_visible_word_returns_copy(prepared_game):
+    visible = prepared_game.get_visible_word()
+
+    visible[0] = "X"
+
+    assert prepared_game.unknown_word[0] == "_"
+
+def test_get_player_returns_player(prepared_game):
+    player = prepared_game.get_player(0)
+
+    assert player.name == "Alice"
+
+def test_get_player_invalid_index(prepared_game):
+    player = prepared_game.get_player(5)
+
+    assert player is None
+
+def test_get_player_negative_index(prepared_game):
+    player = prepared_game.get_player(-1)
+
+    assert player is None
+
+def test_get_remaining_letters_initial(game):
+    letters = game.get_remaining_letters()
+
+    assert "A" in letters
+    assert "Z" in letters
+    assert len(letters) == 26
+
+def test_get_remaining_letters_returns_copy(game):
+    letters = game.get_remaining_letters()
+
+    letters.remove("A")
+
+    assert "A" in game.remaining_letters
