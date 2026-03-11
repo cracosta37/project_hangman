@@ -34,6 +34,51 @@ def test_extended_alphabet_when_normalization_disabled(constants):
     assert "Ñ" in game.remaining_letters
     assert "Á" in game.remaining_letters
 
+def test_normalize_none_input(game):
+    result = game._normalize(None)
+
+    assert result == ""
+
+def test_normalize_uppercases_letters(game):
+    result = game._normalize("hello")
+
+    assert result == "HELLO"
+
+def test_normalize_removes_accents(game):
+    result = game._normalize("canción")
+
+    assert result == "CANCION"
+
+def test_normalize_multiple_accents(game):
+    result = game._normalize("áéíóú")
+
+    assert result == "AEIOU"
+
+def test_normalize_disabled_keeps_accents(constants):
+    game = Game(constants, normalize_input=False)
+
+    result = game._normalize("canción")
+
+    assert result == "CANCIÓN"
+
+def test_normalize_preserves_spaces_and_hyphens(game):
+    result = game._normalize("hola-mundo feliz")
+
+    assert result == "HOLA-MUNDO FELIZ"
+
+def test_normalize_mixed_text(game):
+    result = game._normalize(" Árbol-azúl ")
+
+    assert result == " ARBOL-AZUL "
+
+
+
+
+
+
+
+
+
 def test_set_word_rejects_none(game):
     result = game.set_word(None)
 
