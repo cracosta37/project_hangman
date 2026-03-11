@@ -89,3 +89,61 @@ def test_create_players_success(game):
     assert game.remaining_players == 2
     assert game.players[0].name == "Alice"
     assert game.players[1].name == "Bob"
+
+def test_guess_letter_invalid_player_index(prepared_game):
+    result = prepared_game.guess_letter(5, "A")
+
+    assert result["ok"] is False
+    assert result["repeat"] is False
+
+def test_guess_letter_invalid_input(prepared_game):
+    result = prepared_game.guess_letter(0, "1")
+
+    assert result["ok"] is False
+    assert result["repeat"] is True
+
+def test_guess_letter_detects_repeated_letter(prepared_game):
+    prepared_game.guess_letter(0, "H")
+
+    result = prepared_game.guess_letter(0, "H")
+
+    assert result["ok"] is False
+    assert result["repeat"] is True
+
+def test_guess_letter_correct_guess(prepared_game):
+    result = prepared_game.guess_letter(0, "H")
+
+    assert result["ok"] is True
+    assert result["correct"] is True
+    assert result["positions"] == [0]
+    assert prepared_game.unknown_word[0] == "H"
+
+def test_guess_letter_incorrect_guess(prepared_game):
+    player = prepared_game.players[0]
+    initial_health = player.health
+
+    result = prepared_game.guess_letter(0, "Z")
+
+    assert result["ok"] is True
+    assert result["correct"] is False
+    assert result["positions"] == []
+    assert player.health == initial_health - 1
+
+def test_guess_letter_eliminates_player(prepared_game):
+    player = prepared_game.players[0]
+    player.health = 1
+
+    result = prepared_game.guess_letter(0, "Z")
+
+    assert result["eliminated"] is True
+    assert prepared_game.remaining_players == 1
+
+def test_guess_letter_wins_game(prepared_game):
+    prepared_game.guess_letter(0, "H")
+    prepared_game.guess_letter(0, "E")
+    prepared_game.guess_letter(0, "L")
+
+    result = prepared_game.guess_letter(0, "O")
+
+    assert result["game_won"] is True
+    assert result["winner"] == 0
