@@ -147,3 +147,59 @@ def test_guess_letter_wins_game(prepared_game):
 
     assert result["game_won"] is True
     assert result["winner"] == 0
+
+def test_guess_word_invalid_player_index(prepared_game):
+    result = prepared_game.guess_word(5, "HELLO")
+
+    assert result["ok"] is False
+    assert result["repeat"] is False
+
+def test_guess_word_rejects_eliminated_player(prepared_game):
+    player = prepared_game.players[0]
+    player.health = 0
+
+    result = prepared_game.guess_word(0, "HELLO")
+
+    assert result["ok"] is False
+    assert result["repeat"] is False
+
+def test_guess_word_invalid_guess_input(prepared_game):
+    result = prepared_game.guess_word(0, None)
+
+    assert result["ok"] is False
+    assert result["repeat"] is True
+
+def test_guess_word_rejects_invalid_characters(prepared_game):
+    result = prepared_game.guess_word(0, "HELLO!")
+
+    assert result["ok"] is False
+    assert result["repeat"] is True
+
+def test_guess_word_incorrect_guess(prepared_game):
+    player = prepared_game.players[0]
+    initial_health = player.health
+
+    result = prepared_game.guess_word(0, "WORLD")
+
+    assert result["ok"] is True
+    assert result["correct"] is False
+    assert player.health == initial_health - 1
+
+def test_guess_word_eliminates_player(prepared_game):
+    player = prepared_game.players[0]
+    player.health = 1
+
+    result = prepared_game.guess_word(0, "WORLD")
+
+    assert result["eliminated"] is True
+    assert prepared_game.remaining_players == 1
+
+def test_guess_word_correct_guess(prepared_game):
+    result = prepared_game.guess_word(0, "HELLO")
+
+    assert result["ok"] is True
+    assert result["correct"] is True
+    assert result["game_won"] is True
+    assert result["winner"] == 0
+    assert prepared_game.remaining_spaces == 0
+    assert prepared_game.unknown_word == list("HELLO")
