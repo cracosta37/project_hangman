@@ -71,13 +71,64 @@ def test_normalize_mixed_text(game):
 
     assert result == " ARBOL-AZUL "
 
+def test_reset_for_new_round_success(prepared_game):
+    prepared_game.players[0].health = 1
+    prepared_game.remaining_letters.remove("A")
+    prepared_game.remaining_players = 1
 
+    # verify preconditions
+    assert prepared_game.players[0].health == 1
+    assert "A" not in prepared_game.remaining_letters
+    assert prepared_game.remaining_players == 1
 
+    result = prepared_game.reset_for_new_round("WORLD")
 
+    assert result["ok"] is True
+    assert prepared_game.word == "WORLD"
 
+    assert prepared_game.players[0].health == prepared_game.players[0].max_health
+    assert "A" in prepared_game.remaining_letters
+    assert prepared_game.remaining_players == prepared_game.n_players
 
+def test_reset_for_new_round_preserves_players(prepared_game):
+    original_players = prepared_game.players
 
+    prepared_game.reset_for_new_round("WORLD")
 
+    assert prepared_game.players is original_players
+    assert len(prepared_game.players) == 2
+
+def test_reset_for_new_round_initializes_unknown_word(prepared_game):
+    # verify initial state
+    assert prepared_game.remaining_spaces == 5
+
+    result = prepared_game.reset_for_new_round("PYTHON")
+
+    assert result["ok"] is True
+    assert prepared_game.unknown_word == ["_", "_", "_", "_", "_", "_"]
+    assert prepared_game.remaining_spaces == 6
+
+def test_reset_for_new_round_invalid_word(prepared_game):
+    result = prepared_game.reset_for_new_round("A")
+
+    assert result["ok"] is False
+
+def test_reset_for_new_round_restores_remaining_letters(prepared_game):
+    prepared_game.guess_letter(0, "H")
+    prepared_game.guess_letter(0, "E")
+
+    prepared_game.reset_for_new_round("WORLD")
+
+    assert len(prepared_game.remaining_letters) == 26
+    assert "H" in prepared_game.remaining_letters
+    assert "E" in prepared_game.remaining_letters
+
+def test_reset_for_new_round_restores_remaining_players(prepared_game):
+    prepared_game.remaining_players = 1
+
+    prepared_game.reset_for_new_round("WORLD")
+
+    assert prepared_game.remaining_players == prepared_game.n_players
 
 def test_set_word_rejects_none(game):
     result = game.set_word(None)
