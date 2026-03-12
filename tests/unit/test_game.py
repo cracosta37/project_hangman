@@ -1,6 +1,11 @@
 import pytest
 from hangman.model.game import Game
 
+
+# -----------------------------
+# Fixtures
+# -----------------------------
+
 class DummyConstants:
     MAX_HEALTH = 3
     HANGMAN = ["H", "A", "N", "G", "M", "A", "N"]
@@ -23,6 +28,11 @@ def prepared_game(game_with_players):
     game_with_players.set_word("HELLO")
     return game_with_players
 
+
+# -----------------------------
+# Initialization Tests
+# -----------------------------
+
 def test_game_initializes_remaining_letters(game):
     assert len(game.remaining_letters) == 26
     assert "A" in game.remaining_letters
@@ -33,6 +43,11 @@ def test_extended_alphabet_when_normalization_disabled(constants):
 
     assert "Ñ" in game.remaining_letters
     assert "Á" in game.remaining_letters
+
+
+# -----------------------------
+# Normalization Tests
+# -----------------------------
 
 def test_normalize_none_input(game):
     result = game._normalize(None)
@@ -70,6 +85,48 @@ def test_normalize_mixed_text(game):
     result = game._normalize(" Árbol-azúl ")
 
     assert result == " ARBOL-AZUL "
+
+
+# -----------------------------
+# Word Setting Tests
+# -----------------------------
+
+def test_set_word_rejects_none(game):
+    result = game.set_word(None)
+
+    assert result["ok"] is False
+
+def test_set_word_rejects_empty_string(game):
+    result = game.set_word("   ")
+
+    assert result["ok"] is False
+
+def test_set_word_requires_at_least_two_letters(game):
+    result = game.set_word("A")
+
+    assert result["ok"] is False
+
+def test_set_word_rejects_invalid_characters(game):
+    result = game.set_word("HELLO!")
+
+    assert result["ok"] is False
+
+def test_set_word_initializes_masked_word(game):
+    result = game.set_word("HELLO")
+
+    assert result["ok"] is True
+    assert game.unknown_word == ["_", "_", "_", "_", "_"]
+
+def test_set_word_detects_phrase(game):
+    game.set_word("HELLO WORLD")
+
+    assert game.is_phrase is True
+    assert game.remaining_spaces == 10
+
+
+# -----------------------------
+# Reset For New Round Tests
+# -----------------------------
 
 def test_reset_for_new_round_success(prepared_game):
     prepared_game.players[0].health = 1
@@ -130,37 +187,10 @@ def test_reset_for_new_round_restores_remaining_players(prepared_game):
 
     assert prepared_game.remaining_players == prepared_game.n_players
 
-def test_set_word_rejects_none(game):
-    result = game.set_word(None)
 
-    assert result["ok"] is False
-
-def test_set_word_rejects_empty_string(game):
-    result = game.set_word("   ")
-
-    assert result["ok"] is False
-
-def test_set_word_requires_at_least_two_letters(game):
-    result = game.set_word("A")
-
-    assert result["ok"] is False
-
-def test_set_word_rejects_invalid_characters(game):
-    result = game.set_word("HELLO!")
-
-    assert result["ok"] is False
-
-def test_set_word_initializes_masked_word(game):
-    result = game.set_word("HELLO")
-
-    assert result["ok"] is True
-    assert game.unknown_word == ["_", "_", "_", "_", "_"]
-
-def test_set_word_detects_phrase(game):
-    game.set_word("HELLO WORLD")
-
-    assert game.is_phrase is True
-    assert game.remaining_spaces == 10
+# -----------------------------
+# Player Management Tests
+# -----------------------------
 
 def test_create_players_requires_nonempty_list(game):
     result = game.create_players([])
@@ -185,6 +215,11 @@ def test_create_players_success(game):
     assert game.remaining_players == 2
     assert game.players[0].name == "Alice"
     assert game.players[1].name == "Bob"
+
+
+# -----------------------------
+# Letter Guessing Tests
+# -----------------------------
 
 def test_guess_letter_invalid_player_index(prepared_game):
     result = prepared_game.guess_letter(5, "A")
@@ -244,6 +279,11 @@ def test_guess_letter_wins_game(prepared_game):
     assert result["game_won"] is True
     assert result["winner"] == 0
 
+
+# -----------------------------
+# Word Guessing Tests
+# -----------------------------
+
 def test_guess_word_invalid_player_index(prepared_game):
     result = prepared_game.guess_word(5, "HELLO")
 
@@ -299,6 +339,11 @@ def test_guess_word_correct_guess(prepared_game):
     assert result["winner"] == 0
     assert prepared_game.remaining_spaces == 0
     assert prepared_game.unknown_word == list("HELLO")
+
+
+# -----------------------------
+# Game State & Utility Tests
+# -----------------------------
 
 def test_word_label_returns_word(game):
     game.set_word("HELLO")
