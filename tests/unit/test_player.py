@@ -1,5 +1,5 @@
 import pytest
-from player import Player
+from hangman.model.player import Player
 
 
 # -----------------------------
@@ -9,7 +9,6 @@ from player import Player
 @pytest.fixture
 def hangman_states():
     return ["state1", "state2", "state3"]
-
 
 @pytest.fixture
 def player(hangman_states):
@@ -27,6 +26,10 @@ def low_health_player(hangman_states):
         hangman_states=hangman_states
     )
 
+@pytest.fixture
+def dead_player(low_health_player):
+    low_health_player.lose_health()
+    return low_health_player
 
 # -----------------------------
 # Initialization Tests
@@ -99,3 +102,20 @@ def test_lose_health_when_player_already_dead(low_health_player):
     assert low_health_player.health == 0
     assert result is False
 
+
+# -----------------------------
+# is_alive Tests
+# -----------------------------
+
+def test_is_alive_returns_true_when_health_positive(player):
+    assert player.is_alive() is True
+
+
+def test_is_alive_returns_false_when_health_zero(dead_player):
+    assert dead_player.is_alive() is False
+
+
+def test_is_alive_after_losing_all_health(low_health_player):
+    low_health_player.lose_health()
+
+    assert low_health_player.is_alive() is False
