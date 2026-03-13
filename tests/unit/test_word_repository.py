@@ -44,3 +44,29 @@ def nonexistent_file(tmp_path):
 # Initialization Tests
 # -----------------------------
 
+def test_init_with_valid_dict(valid_dict_word_file):
+    repo = WordRepository(valid_dict_word_file)
+
+    assert repo.file_path.exists()
+    assert repo.used_words == set()
+
+    assert set(repo.normalized_words_by_diff.keys()) == {"EASY", "MEDIUM", "HARD"}
+
+    assert "CAT" in repo.normalized_words_by_diff["EASY"]
+    assert "DOG" in repo.normalized_words_by_diff["EASY"]
+    assert "PYTHON" in repo.normalized_words_by_diff["MEDIUM"]
+
+def test_init_with_list_format(valid_list_word_file):
+    repo = WordRepository(valid_list_word_file)
+
+    assert repo.normalized_words_by_diff["MEDIUM"]
+    assert "APPLE" in repo.normalized_words_by_diff["MEDIUM"]
+    assert "BANANA" in repo.normalized_words_by_diff["MEDIUM"]
+
+def test_init_missing_file_raises_error(nonexistent_file):
+    with pytest.raises(FileNotFoundError):
+        WordRepository(nonexistent_file)
+
+def test_init_invalid_json_raises_error(invalid_json_file):
+    with pytest.raises(ValueError):
+        WordRepository(invalid_json_file)
