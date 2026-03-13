@@ -51,6 +51,27 @@ def invalid_root_string(tmp_path):
     file_path.write_text(json.dumps("hello world"), encoding="utf-8")
     return file_path
 
+@pytest.fixture
+def dict_with_unknown_difficulty(tmp_path):
+    data = {
+        "easy": ["cat"],
+        "impossible": ["dragon"]
+    }
+
+    file_path = tmp_path / "words.json"
+    file_path.write_text(json.dumps(data), encoding="utf-8")
+    return file_path
+
+@pytest.fixture
+def dict_with_invalid_entries(tmp_path):
+    data = {
+        "easy": ["cat", 123, "", "a", "dog!"]
+    }
+
+    file_path = tmp_path / "words.json"
+    file_path.write_text(json.dumps(data), encoding="utf-8")
+    return file_path
+
 
 # -----------------------------
 # Initialization Tests
@@ -76,3 +97,45 @@ def test_init_missing_file_raises_error(nonexistent_file):
 def test_init_invalid_json_raises_error(invalid_json_file):
     with pytest.raises(ValueError):
         WordRepository(invalid_json_file)
+
+
+#-----------------------------
+# Loading and Validation Tests
+#-----------------------------
+
+def test_load_dict_structure(valid_dict_word_file):
+    repo = WordRepository(valid_dict_word_file)
+
+    assert repo.normalized_words_by_diff["EASY"] == {"CAT", "DOG"}
+    assert repo.normalized_words_by_diff["MEDIUM"] == {"PYTHON", "HANGMAN"}
+    assert repo.normalized_words_by_diff["HARD"] == {"ARCHITECTURE"}
+
+def test_load_list_structure(valid_list_word_file):
+    repo = WordRepository(valid_list_word_file)
+
+    assert repo.normalized_words_by_diff["MEDIUM"] == {
+        "APPLE", "BANANA", "CHERRY"
+    }
+
+    assert repo.normalized_words_by_diff["EASY"] == set()
+    assert repo.normalized_words_by_diff["HARD"] == set()
+
+def test_load_invalid_root_integer(invalid_root_integer):
+    with pytest.raises(TypeError):
+        WordRepository(invalid_root_integer)
+
+def test_load_invalid_root_string(invalid_root_string):
+    with pytest.raises(TypeError):
+        WordRepository(invalid_root_string)
+
+def test_unknown_difficulty_keys_are_ignored(dict_with_unknown_difficulty):
+    repo = WordRepository(dict_with_unknown_difficulty)
+
+    assert repo.normalized_words_by_diff["EASY"] == {"CAT"}
+    assert repo.normalized_words_by_diff["MEDIUM"] == set()
+    assert repo.normalized_words_by_diff["HARD"] == set()
+
+def test_invalid_entries_are_skipped(dict_with_invalid_entries):
+    repo = WordRepository(dict_with_invalid_entries)
+
+    assert repo.normalized_words_by_diff["EASY"] == {"CAT"}
