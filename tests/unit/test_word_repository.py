@@ -74,6 +74,13 @@ def dict_with_non_list_values(make_json_file):
         "medium": ["python"]
     })
 
+@pytest.fixture
+def dict_with_mixed_case_keys(make_json_file):
+    return make_json_file({
+        "Easy": ["cat"],
+        "MeDiUm": ["python"],
+        "HARD": ["architecture"]
+    })
 
 # -----------------------------
 # Initialization Tests
