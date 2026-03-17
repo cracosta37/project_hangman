@@ -7,26 +7,24 @@ from hangman.services.word_repository import WordRepository
 # -----------------------------
 
 @pytest.fixture
-def valid_dict_word_file(tmp_path):
-    data = {
+def make_json_file(tmp_path):
+    def _make(data, filename="words.json"):
+        file_path = tmp_path / filename
+        file_path.write_text(json.dumps(data), encoding="utf-8")
+        return file_path
+    return _make
+
+@pytest.fixture
+def valid_dict_word_file(make_json_file):
+    return make_json_file({
         "easy": ["cat", "dog"],
         "medium": ["python", "hangman"],
         "hard": ["architecture"]
-    }
-
-    file_path = tmp_path / "words.json"
-    file_path.write_text(json.dumps(data), encoding="utf-8")
-
-    return file_path
+    })
 
 @pytest.fixture
-def valid_list_word_file(tmp_path):
-    data = ["apple", "banana", "cherry"]
-
-    file_path = tmp_path / "words.json"
-    file_path.write_text(json.dumps(data), encoding="utf-8")
-
-    return file_path
+def valid_list_word_file(make_json_file):
+    return make_json_file(["apple", "banana", "cherry"])
 
 @pytest.fixture
 def invalid_json_file(tmp_path):
@@ -40,37 +38,41 @@ def nonexistent_file(tmp_path):
     return tmp_path / "missing.json"
 
 @pytest.fixture
-def invalid_root_integer(tmp_path):
-    file_path = tmp_path / "words.json"
-    file_path.write_text(json.dumps(123), encoding="utf-8")
-    return file_path
+def invalid_root_integer(make_json_file):
+    return make_json_file(123)
+
 
 @pytest.fixture
-def invalid_root_string(tmp_path):
-    file_path = tmp_path / "words.json"
-    file_path.write_text(json.dumps("hello world"), encoding="utf-8")
-    return file_path
+def invalid_root_string(make_json_file):
+    return make_json_file("hello world")
 
 @pytest.fixture
-def dict_with_unknown_difficulty(tmp_path):
-    data = {
+def dict_with_unknown_difficulty(make_json_file):
+    return make_json_file({
         "easy": ["cat"],
         "impossible": ["dragon"]
-    }
-
-    file_path = tmp_path / "words.json"
-    file_path.write_text(json.dumps(data), encoding="utf-8")
-    return file_path
+    })
 
 @pytest.fixture
-def dict_with_invalid_entries(tmp_path):
-    data = {
-        "easy": ["cat", 123, "", "a", "dog!"]
-    }
+def dict_with_mixed_entries(make_json_file):
+    return make_json_file({
+        "easy": ["cat", 123, "", "a", "dog!", "bird"],
+        "medium": ["python", None, "ok"],
+    })
 
-    file_path = tmp_path / "words.json"
-    file_path.write_text(json.dumps(data), encoding="utf-8")
-    return file_path
+@pytest.fixture
+def dict_with_non_string_keys(make_json_file):
+    return make_json_file({
+        "easy": ["cat"],
+        123: ["dog"],  # JSON forces keys to strings
+    })
+
+@pytest.fixture
+def dict_with_non_list_values(make_json_file):
+    return make_json_file({
+        "easy": "cat",  # invalid
+        "medium": ["python"]
+    })
 
 
 # -----------------------------
@@ -135,7 +137,8 @@ def test_unknown_difficulty_keys_are_ignored(dict_with_unknown_difficulty):
     assert repo.normalized_words_by_diff["MEDIUM"] == set()
     assert repo.normalized_words_by_diff["HARD"] == set()
 
-def test_invalid_entries_are_skipped(dict_with_invalid_entries):
-    repo = WordRepository(dict_with_invalid_entries)
+def test_invalid_entries_are_filtered_across_difficulties(dict_with_mixed_entries):
+    repo = WordRepository(dict_with_mixed_entries)
 
-    assert repo.normalized_words_by_diff["EASY"] == {"CAT"}
+    assert repo.normalized_words_by_diff["EASY"] == {"CAT", "BIRD"}
+    assert repo.normalized_words_by_diff["MEDIUM"] == {"PYTHON", "OK"}
