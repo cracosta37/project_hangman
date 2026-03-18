@@ -64,13 +64,13 @@ def dict_with_mixed_entries(make_json_file):
 def dict_with_non_string_keys(make_json_file):
     return make_json_file({
         "easy": ["cat"],
-        123: ["dog"],  # JSON forces keys to strings
+        123: ["dog"],
     })
 
 @pytest.fixture
 def dict_with_non_list_values(make_json_file):
     return make_json_file({
-        "easy": "cat",  # invalid
+        "easy": "cat",
         "medium": ["python"]
     })
 
@@ -81,6 +81,13 @@ def dict_with_mixed_case_keys(make_json_file):
         "MeDiUm": ["python"],
         "HARD": ["architecture"]
     })
+
+@pytest.fixture
+def dict_with_only_invalid_entries(make_json_file):
+    return make_json_file({
+        "easy": ["!", "", 123]
+    })
+
 
 # -----------------------------
 # Initialization Tests
@@ -149,3 +156,31 @@ def test_invalid_entries_are_filtered_across_difficulties(dict_with_mixed_entrie
 
     assert repo.normalized_words_by_diff["EASY"] == {"CAT", "BIRD"}
     assert repo.normalized_words_by_diff["MEDIUM"] == {"PYTHON", "OK"}
+
+
+# ------------------------------
+# Dictionary Loading Tests
+# -----------------------------
+
+def test_load_from_dict_ignores_non_string_keys(dict_with_non_string_keys):
+    repo = WordRepository(dict_with_non_string_keys)
+
+    assert repo.normalized_words_by_diff["EASY"] == {"CAT"}
+
+def test_load_from_dict_ignores_non_list_values(dict_with_non_list_values):
+    repo = WordRepository(dict_with_non_list_values)
+
+    assert repo.normalized_words_by_diff["EASY"] == set()
+    assert repo.normalized_words_by_diff["MEDIUM"] == {"PYTHON"}
+
+def test_load_from_dict_normalizes_keys(dict_with_mixed_case_keys):
+    repo = WordRepository(dict_with_mixed_case_keys)
+
+    assert repo.normalized_words_by_diff["EASY"] == {"CAT"}
+    assert repo.normalized_words_by_diff["MEDIUM"] == {"PYTHON"}
+    assert repo.normalized_words_by_diff["HARD"] == {"ARCHITECTURE"}
+
+def test_load_from_dict_empty_valid_result(dict_with_only_invalid_entries):
+    repo = WordRepository(dict_with_only_invalid_entries)
+
+    assert repo.normalized_words_by_diff["EASY"] == set()
