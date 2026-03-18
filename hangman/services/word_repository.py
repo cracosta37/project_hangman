@@ -57,6 +57,11 @@ class WordRepository:
         else:
             raise TypeError("Word bank root must be either an object (dict) or an array (list).")
 
+    def _add_if_valid(self, item: object, difficulty: str) -> None:
+        normalized = self._validate_normalize(item)
+        if normalized:
+            self.normalized_words_by_diff[difficulty].add(normalized)
+
     def _load_from_dict(self, data: dict) -> None:
         for raw_key, values in data.items():
             if not isinstance(raw_key, str):
@@ -70,15 +75,11 @@ class WordRepository:
                 continue
 
             for item in values:
-                normalized = self._validate_normalize(item)
-                if normalized:
-                    self.normalized_words_by_diff[key].add(normalized)
+                self._add_if_valid(item, key)
 
     def _load_from_list(self, data: list) -> None:
         for item in data:
-            normalized = self._validate_normalize(item)
-            if normalized:
-                self.normalized_words_by_diff["MEDIUM"].add(normalized)
+            self._add_if_valid(item, "MEDIUM")
 
     def _validate_normalize(self, raw: object) -> str | None:
         """

@@ -88,6 +88,35 @@ def dict_with_only_invalid_entries(make_json_file):
         "easy": ["!", "", 123]
     })
 
+@pytest.fixture
+def list_with_mixed_entries(make_json_file):
+    return make_json_file([
+        "apple",
+        "banana",
+        "",
+        "a",
+        "dog!",
+        123,
+        "cherry"
+    ])
+
+
+@pytest.fixture
+def list_with_only_invalid_entries(make_json_file):
+    return make_json_file([
+        "", "!", 123, None, "a"
+    ])
+
+
+@pytest.fixture
+def list_with_duplicates_and_variants(make_json_file):
+    return make_json_file([
+        "apple",
+        "Apple",
+        "  apple  ",
+        "ápple"
+    ])
+
 
 # -----------------------------
 # Initialization Tests
@@ -157,11 +186,6 @@ def test_invalid_entries_are_filtered_across_difficulties(dict_with_mixed_entrie
     assert repo.normalized_words_by_diff["EASY"] == {"CAT", "BIRD"}
     assert repo.normalized_words_by_diff["MEDIUM"] == {"PYTHON", "OK"}
 
-
-# ------------------------------
-# Dictionary Loading Tests
-# -----------------------------
-
 def test_load_from_dict_ignores_non_string_keys(dict_with_non_string_keys):
     repo = WordRepository(dict_with_non_string_keys)
 
@@ -184,3 +208,26 @@ def test_load_from_dict_empty_valid_result(dict_with_only_invalid_entries):
     repo = WordRepository(dict_with_only_invalid_entries)
 
     assert repo.normalized_words_by_diff["EASY"] == set()
+
+def test_load_from_list_filters_invalid_entries(list_with_mixed_entries):
+    repo = WordRepository(list_with_mixed_entries)
+
+    assert repo.normalized_words_by_diff["MEDIUM"] == {
+        "APPLE", "BANANA", "CHERRY"
+    }
+
+def test_load_from_list_only_invalid_entries_results_empty(list_with_only_invalid_entries):
+    repo = WordRepository(list_with_only_invalid_entries)
+
+    assert repo.normalized_words_by_diff["MEDIUM"] == set()
+
+def test_load_from_list_deduplicates_and_normalizes(list_with_duplicates_and_variants):
+    repo = WordRepository(list_with_duplicates_and_variants)
+
+    assert repo.normalized_words_by_diff["MEDIUM"] == {"APPLE"}
+
+def test_load_from_list_does_not_affect_other_difficulties(valid_list_word_file):
+    repo = WordRepository(valid_list_word_file)
+
+    assert repo.normalized_words_by_diff["EASY"] == set()
+    assert repo.normalized_words_by_diff["HARD"] == set()
