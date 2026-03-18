@@ -41,10 +41,38 @@ def nonexistent_file(tmp_path):
 def invalid_root_integer(make_json_file):
     return make_json_file(123)
 
-
 @pytest.fixture
 def invalid_root_string(make_json_file):
     return make_json_file("hello world")
+
+@pytest.fixture
+def dict_with_multiple_difficulties(make_json_file):
+    return make_json_file({
+        "easy": ["cat"],
+        "medium": ["dog"],
+    })
+
+@pytest.fixture
+def equivalent_dict_and_list(make_json_file):
+    data_list = ["apple", "banana", "cherry"]
+    data_dict = {"medium": data_list}
+
+    return (
+        make_json_file(data_list, filename="list.json"),
+        make_json_file(data_dict, filename="dict.json"),
+    )
+
+@pytest.fixture
+def large_mixed_list(make_json_file):
+    data = ["validword"] * 50 + ["!", "", 123, None] * 50
+    return make_json_file(data)
+
+@pytest.fixture
+def list_with_overlong_word(make_json_file):
+    return make_json_file([
+        "a" * 121,
+        "validword"
+    ])
 
 @pytest.fixture
 def dict_with_unknown_difficulty(make_json_file):
@@ -100,7 +128,6 @@ def list_with_mixed_entries(make_json_file):
         "cherry"
     ])
 
-
 @pytest.fixture
 def list_with_only_invalid_entries(make_json_file):
     return make_json_file([
@@ -116,6 +143,12 @@ def list_with_duplicates_and_variants(make_json_file):
         "  apple  ",
         "ápple"
     ])
+
+@pytest.fixture
+def empty_repo(tmp_path):
+    file_path = tmp_path / "empty.json"
+    file_path.write_text("[]", encoding="utf-8")
+    return WordRepository(file_path)
 
 
 # -----------------------------
@@ -172,6 +205,32 @@ def test_load_invalid_root_integer(invalid_root_integer):
 def test_load_invalid_root_string(invalid_root_string):
     with pytest.raises(TypeError):
         WordRepository(invalid_root_string)
+
+def test_list_and_dict_loading_are_equivalent(equivalent_dict_and_list):
+    list_file, dict_file = equivalent_dict_and_list
+
+    repo_list = WordRepository(list_file)
+    repo_dict = WordRepository(dict_file)
+
+    assert repo_list.normalized_words_by_diff["MEDIUM"] == \
+           repo_dict.normalized_words_by_diff["MEDIUM"]
+
+def test_add_if_valid_respects_target_difficulty(dict_with_multiple_difficulties):
+    repo = WordRepository(dict_with_multiple_difficulties)
+
+    assert repo.normalized_words_by_diff["EASY"] == {"CAT"}
+    assert repo.normalized_words_by_diff["MEDIUM"] == {"DOG"}
+    assert repo.normalized_words_by_diff["HARD"] == set()
+
+def test_large_input_filters_correctly(large_mixed_list):
+    repo = WordRepository(large_mixed_list)
+
+    assert repo.normalized_words_by_diff["MEDIUM"] == {"VALIDWORD"}
+
+def test_load_from_list_rejects_overlong_words(list_with_overlong_word):
+    repo = WordRepository(list_with_overlong_word)
+
+    assert repo.normalized_words_by_diff["MEDIUM"] == {"VALIDWORD"}
 
 def test_unknown_difficulty_keys_are_ignored(dict_with_unknown_difficulty):
     repo = WordRepository(dict_with_unknown_difficulty)
@@ -231,3 +290,65 @@ def test_load_from_list_does_not_affect_other_difficulties(valid_list_word_file)
 
     assert repo.normalized_words_by_diff["EASY"] == set()
     assert repo.normalized_words_by_diff["HARD"] == set()
+
+def test_validate_normalize_valid_word(empty_repo):
+    result = empty_repo._validate_normalize("cat")
+
+    assert result == "CAT"
+
+def test_validate_normalize_strips_and_uppercases(empty_repo):
+    result = empty_repo._validate_normalize("  dog  ")
+
+    assert result == "DOG"
+
+def test_validate_normalize_collapses_spaces(empty_repo):
+    result = empty_repo._validate_normalize("hello   world")
+
+    assert result == "HELLO WORLD"
+
+def test_validate_normalize_removes_diacritics(empty_repo):
+    result = empty_repo._validate_normalize("café")
+
+    assert result == "CAFE"
+
+def test_validate_normalize_allows_hyphens(empty_repo):
+    result = empty_repo._validate_normalize("well-being")
+
+    assert result == "WELL-BEING"
+
+@pytest.mark.parametrize("value", [123, None, ["list"], {"key": "value"}])
+def test_validate_normalize_rejects_non_string(empty_repo, value):
+    assert empty_repo._validate_normalize(value) is None
+
+@pytest.mark.parametrize("value", ["", "   ", "\n", "\t"])
+def test_validate_normalize_rejects_empty_strings(empty_repo, value):
+    assert empty_repo._validate_normalize(value) is None
+
+@pytest.mark.parametrize("value", [
+    "dog!",
+    "hello123",
+    "test@case",
+    "name#",
+])
+def test_validate_normalize_rejects_invalid_characters(empty_repo, value):
+    assert empty_repo._validate_normalize(value) is None
+
+@pytest.mark.parametrize("value", [
+    "a",
+    "-",
+    " - ",
+])
+def test_validate_normalize_requires_minimum_alpha(empty_repo, value):
+    assert empty_repo._validate_normalize(value) is None
+
+def test_validate_normalize_rejects_overlong_strings(empty_repo):
+    value = "a" * 121
+
+    assert empty_repo._validate_normalize(value) is None
+
+def test_validate_normalize_accepts_max_length(empty_repo):
+    value = "a" * 120
+
+    result = empty_repo._validate_normalize(value)
+
+    assert result == "A" * 120
