@@ -1,10 +1,17 @@
 import json
 import pytest
+from unittest.mock import patch
 from hangman.services.word_repository import WordRepository
 
 # -----------------------------
 # Fixtures
 # -----------------------------
+
+@pytest.fixture
+def make_repo(make_json_file):
+    def _make(data):
+        return WordRepository(make_json_file(data))
+    return _make
 
 @pytest.fixture
 def make_json_file(tmp_path):
@@ -149,6 +156,20 @@ def empty_repo(tmp_path):
     file_path = tmp_path / "empty.json"
     file_path.write_text("[]", encoding="utf-8")
     return WordRepository(file_path)
+
+@pytest.fixture
+def repo_with_words(make_repo):
+    return make_repo({
+        "easy": ["cat", "dog"],
+        "medium": ["python"],
+        "hard": ["architecture"]
+    })
+
+@pytest.fixture
+def repo_single_word(make_repo):
+    return make_repo({
+        "easy": ["cat"]
+    })
 
 
 # -----------------------------
@@ -379,3 +400,67 @@ def test_normalize_for_internal_is_idempotent():
     result = WordRepository._normalize_for_internal(text)
 
     assert result == text
+
+
+# -----------------------------
+# Public API Tests
+# -----------------------------
+
+def test_get_by_difficulty_returns_valid_word(repo_with_words):
+    result = repo_with_words.get_by_difficulty("easy")
+
+    assert result in {"CAT", "DOG"}
+
+def test_get_by_difficulty_normalizes_input(repo_with_words):
+    result = repo_with_words.get_by_difficulty("  Easy ")
+
+    assert result in {"CAT", "DOG"}
+
+def test_get_by_difficulty_marks_word_as_used(repo_with_words):
+    result = repo_with_words.get_by_difficulty("easy")
+
+    assert result in repo_with_words.used_words
+
+def test_get_by_difficulty_no_repeats(repo_with_words):
+    first = repo_with_words.get_by_difficulty("easy")
+    second = repo_with_words.get_by_difficulty("easy")
+
+    assert first != second
+    assert {first, second} == {"CAT", "DOG"}
+
+def test_get_by_difficulty_raises_when_exhausted(repo_single_word):
+    repo_single_word.get_by_difficulty("easy")
+
+    with pytest.raises(ValueError):
+        repo_single_word.get_by_difficulty("easy")
+
+def test_get_by_difficulty_invalid_key(repo_with_words):
+    with pytest.raises(ValueError):
+        repo_with_words.get_by_difficulty("invalid")
+
+@pytest.mark.parametrize("value", [123, None, [], {}])
+def test_get_by_difficulty_requires_string(repo_with_words, value):
+    with pytest.raises(TypeError):
+        repo_with_words.get_by_difficulty(value)
+
+def test_get_by_difficulty_empty_bucket(repo_single_word):
+    with pytest.raises(ValueError):
+        repo_single_word.get_by_difficulty("medium")
+
+def test_get_by_difficulty_isolated_between_difficulties(repo_with_words):
+    easy_word = repo_with_words.get_by_difficulty("easy")
+    medium_word = repo_with_words.get_by_difficulty("medium")
+
+    assert easy_word == "CAT" or easy_word == "DOG"
+    assert medium_word == "PYTHON"
+
+def test_get_by_difficulty_single_choice_is_deterministic(repo_single_word):
+    result = repo_single_word.get_by_difficulty("easy")
+
+    assert result == "CAT"
+
+def test_get_by_difficulty_with_mocked_random(repo_with_words):
+    with patch("random.choice", return_value="CAT"):
+        result = repo_with_words.get_by_difficulty("easy")
+
+    assert result == "CAT"
