@@ -352,3 +352,30 @@ def test_validate_normalize_accepts_max_length(empty_repo):
     result = empty_repo._validate_normalize(value)
 
     assert result == "A" * 120
+
+
+# -------------------------
+# Normalization Tests
+#--------------------------
+
+@pytest.mark.parametrize("input_text,expected", [
+    ("hello", "HELLO"),
+    ("  hello   world  ", "HELLO WORLD"),
+    ("café", "CAFE"),
+    ("Árbol Niño", "ARBOL NINO"),
+    ("hello\tworld\npython", "HELLO WORLD PYTHON"),
+    ("well-being", "WELL-BEING"),
+    ("e\u0301", "E"),
+    ("\u0301\u0301", "")
+])
+def test_normalize_for_internal_parametrized(input_text, expected):
+    result = WordRepository._normalize_for_internal(input_text)
+
+    assert result == expected
+
+def test_normalize_for_internal_is_idempotent():
+    text = "HELLO WORLD"
+
+    result = WordRepository._normalize_for_internal(text)
+
+    assert result == text
