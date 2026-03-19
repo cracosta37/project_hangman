@@ -359,14 +359,14 @@ def test_validate_normalize_accepts_max_length(empty_repo):
 #--------------------------
 
 @pytest.mark.parametrize("input_text,expected", [
-    ("hello", "HELLO"),
-    ("  hello   world  ", "HELLO WORLD"),
-    ("café", "CAFE"),
-    ("Árbol Niño", "ARBOL NINO"),
-    ("hello\tworld\npython", "HELLO WORLD PYTHON"),
-    ("well-being", "WELL-BEING"),
-    ("e\u0301", "E"),
-    ("\u0301\u0301", "")
+    ("hello", "HELLO"),                             # Uppercases
+    ("  hello   world  ", "HELLO WORLD"),           # Collapses and strips spaces
+    ("café", "CAFE"),                               # Removes diacritics
+    ("Árbol Niño", "ARBOL NINO"),                   # Handles complex unicode
+    ("hello\tworld\npython", "HELLO WORLD PYTHON"), # Handles tabs and newlines
+    ("well-being", "WELL-BEING"),                   # Preserves hyphens
+    ("e\u0301", "E"),                               # Removes combining marks
+    ("\u0301\u0301", "")                            # Only combining marks
 ])
 def test_normalize_for_internal_parametrized(input_text, expected):
     result = WordRepository._normalize_for_internal(input_text)
