@@ -85,7 +85,7 @@ def test_init_invalid_json_raises_error(tmp_path):
         WordRepository(file_path)
 
 
-@pytest.mark.parametrize("invalid_root", [123, "hello"])
+@pytest.mark.parametrize("invalid_root", [123, "hello"]) # Non-dict, non-list types
 def test_invalid_root_types(make_repo, invalid_root):
     with pytest.raises(TypeError):
         make_repo(invalid_root)
@@ -116,8 +116,8 @@ def test_load_list_structure(make_repo):
 
 
 @pytest.mark.parametrize("data,expected", [
-    (["apple", "", "banana", "!"], {"APPLE", "BANANA"}),
-    (["!", "", None], set()),
+    (["apple", "", "banana", "!"], {"APPLE", "BANANA"}), # Valid words only
+    (["!", "", None], set()),                            # No valid words
 ])
 def test_load_from_list_filtering(make_repo, data, expected):
     repo = make_repo(data)
@@ -147,7 +147,7 @@ def test_dict_and_list_equivalence(make_json_file):
 
 @pytest.mark.parametrize("data,expected_easy,expected_medium", [
     (
-        {"easy": ["cat", 123, "", "bird"], "medium": ["python", None]},
+        {"easy": ["cat", 123, "", "bird"], "medium": ["python", None]}, # Mixed valid/invalid
         {"CAT", "BIRD"},
         {"PYTHON"},
     ),
@@ -164,21 +164,21 @@ def test_dict_filtering(make_repo, data, expected_easy, expected_medium):
 # -----------------------------
 
 @pytest.mark.parametrize("value,expected", [
-    ("cat", "CAT"),
-    ("  dog  ", "DOG"),
-    ("hello   world", "HELLO WORLD"),
-    ("café", "CAFE"),
-    ("well-being", "WELL-BEING"),
+    ("cat", "CAT"),                     # Simple case
+    ("  dog  ", "DOG"),                 # Leading/trailing spaces
+    ("hello   world", "HELLO WORLD"),   # Multiple spaces
+    ("café", "CAFE"),                   # Accents removed
+    ("well-being", "WELL-BEING"),       # Hyphens preserved
 ])
 def test_validate_normalize_valid_cases(empty_repo, value, expected):
     assert empty_repo._validate_normalize(value) == expected
 
 
 @pytest.mark.parametrize("value", [
-    123, None, [], {},
-    "", "   ",
-    "dog!", "hello123",
-    "a", "-", " - ",
+    123, None, [], {},  # Non-string types
+    "", "   ",          # Empty or whitespace-only
+    "dog!", "hello123", # Invalid characters
+    "a", "-", " - ",    # Too short or just a hyphen
 ])
 def test_validate_normalize_invalid_cases(empty_repo, value):
     assert empty_repo._validate_normalize(value) is None
@@ -194,14 +194,14 @@ def test_validate_normalize_length_bounds(empty_repo):
 # -----------------------------
 
 @pytest.mark.parametrize("input_text,expected", [
-    ("hello", "HELLO"),
-    ("  hello   world  ", "HELLO WORLD"),
-    ("café", "CAFE"),
-    ("Árbol Niño", "ARBOL NINO"),
-    ("hello\tworld\npython", "HELLO WORLD PYTHON"),
-    ("well-being", "WELL-BEING"),
-    ("e\u0301", "E"),
-    ("\u0301\u0301", ""),
+    ("hello", "HELLO"),                             # Simple case
+    ("  hello   world  ", "HELLO WORLD"),           # Leading/trailing/multiple spaces
+    ("café", "CAFE"),                               # Accents removed
+    ("Árbol Niño", "ARBOL NINO"),                   # Accents removed, multiple spaces normalized
+    ("hello\tworld\npython", "HELLO WORLD PYTHON"), # Tabs and newlines normalized to spaces
+    ("well-being", "WELL-BEING"),                   # Hyphens preserved
+    ("e\u0301", "E"),                               # Accented character with combining acute accent
+    ("\u0301\u0301", ""),                           # Combining characters only
 ])
 def test_normalize_for_internal(input_text, expected):
     assert WordRepository._normalize_for_internal(input_text) == expected
@@ -244,7 +244,7 @@ def test_get_by_difficulty_exhaustion(repo_single_word):
         repo_single_word.get_by_difficulty("easy")
 
 
-@pytest.mark.parametrize("value", [123, None, [], {}])
+@pytest.mark.parametrize("value", [123, None, [], {}]) # Non-string types
 def test_get_by_difficulty_requires_string(repo_with_words, value):
     with pytest.raises(TypeError):
         repo_with_words.get_by_difficulty(value)
