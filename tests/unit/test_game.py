@@ -49,25 +49,19 @@ def test_extended_alphabet_when_normalization_disabled(constants):
 # Normalization Tests
 # -----------------------------
 
-def test_normalize_none_input(game):
-    result = game._normalize(None)
-
-    assert result == ""
-
-def test_normalize_uppercases_letters(game):
-    result = game._normalize("hello")
-
-    assert result == "HELLO"
-
-def test_normalize_removes_accents(game):
-    result = game._normalize("canción")
-
-    assert result == "CANCION"
-
-def test_normalize_multiple_accents(game):
-    result = game._normalize("áéíóú")
-
-    assert result == "AEIOU"
+@pytest.mark.parametrize(
+    "input_text, expected",
+    [
+        (None, ""),                                 # None input
+        ("hello", "HELLO"),                         # Basic lowercase
+        ("canción", "CANCION"),                     # Accented characters
+        ("áéíóú", "AEIOU"),                         # Multiple accents
+        ("hola-mundo feliz", "HOLA-MUNDO FELIZ"),   # Phrase with hyphen and space
+        (" Árbol-azúl ", " ARBOL-AZUL "),           # Leading/trailing whitespace
+    ],
+)
+def test_normalization(game, input_text, expected):
+    assert game._normalize(input_text) == expected
 
 def test_normalize_disabled_keeps_accents(constants):
     game = Game(constants, normalize_input=False)
@@ -76,38 +70,17 @@ def test_normalize_disabled_keeps_accents(constants):
 
     assert result == "CANCIÓN"
 
-def test_normalize_preserves_spaces_and_hyphens(game):
-    result = game._normalize("hola-mundo feliz")
-
-    assert result == "HOLA-MUNDO FELIZ"
-
-def test_normalize_mixed_text(game):
-    result = game._normalize(" Árbol-azúl ")
-
-    assert result == " ARBOL-AZUL "
-
 
 # -----------------------------
 # Word Setting Tests
 # -----------------------------
 
-def test_set_word_rejects_none(game):
-    result = game.set_word(None)
-
-    assert result["ok"] is False
-
-def test_set_word_rejects_empty_string(game):
-    result = game.set_word("   ")
-
-    assert result["ok"] is False
-
-def test_set_word_requires_at_least_two_letters(game):
-    result = game.set_word("A")
-
-    assert result["ok"] is False
-
-def test_set_word_rejects_invalid_characters(game):
-    result = game.set_word("HELLO!")
+@pytest.mark.parametrize(
+    "word",
+    [None, "   ", "A", "HELLO!"], # Invalid inputs: None, empty, single letter, invalid character
+)
+def test_set_word_invalid_inputs(game, word):
+    result = game.set_word(word)
 
     assert result["ok"] is False
 
