@@ -53,9 +53,9 @@ def dead_player(make_player):
 @pytest.mark.parametrize(
     "name, max_health, states",
     [
-        ("Alice", 5, ["s1", "s2"]),
-        ("Player_123", 4, ["a", "b", "c"]),
-        ("Bob", 1, []),
+        ("Alice", 5, ["s1", "s2"]),         # Valid case with custom states
+        ("Player_123", 4, ["a", "b", "c"]), # Valid case with different name and states
+        ("Bob", 1, []),                     # Valid case with empty states list
     ]
 )
 def test_constructor_initializes_attributes(make_player, name, max_health, states):
@@ -87,10 +87,11 @@ def test_lose_health_decrements_by_one(player):
 @pytest.mark.parametrize(
     "initial_health, expected_health, expected_return",
     [
-        (5, 4, False),
-        (2, 1, False),
-        (1, 0, True),
-        (0, 0, False),
+        (5, 4, False),  # Valid case with more than 1 health
+        (2, 1, False),  # Valid case with exactly 2 health
+        (1, 0, True),   # Valid case with exactly 1 health (transition to zero)
+        (0, 0, False),  # Valid case with already zero health (should not go negative)
+        (-1, 0, False), # Valid case with negative health (should be treated as zero)
     ]
 )
 def test_lose_health_behavior(make_player, initial_health, expected_health, expected_return):
@@ -121,9 +122,10 @@ def test_lose_health_is_idempotent_at_zero(make_player):
 @pytest.mark.parametrize(
     "health, expected",
     [
-        (5, True),
-        (1, True),
-        (0, False),
+        (5, True),  # Valid case with full health
+        (3, True),  # Valid case with more than 1 health
+        (1, True),  # Valid case with exactly 1 health (still alive)
+        (0, False), # Valid case with zero health (not alive)
     ]
 )
 def test_is_alive(make_player, health, expected):
