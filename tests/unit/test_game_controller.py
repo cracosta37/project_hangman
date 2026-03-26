@@ -82,9 +82,9 @@ def controller_factory(view_factory, game_factory, word_repo_factory):
 @pytest.mark.parametrize(
     "inputs, expected",
     [
-        (["Y"], True),
-        (["N"], False),
-        (["invalid", "Y"], True),
+        (["Y"], True),              # Accept normalization
+        (["N"], False),             # Decline normalization
+        (["invalid", "Y"], True),   # Invalid input followed by valid acceptance
     ],
 )
 def test_choose_normalization(controller_factory, inputs, expected):
@@ -99,9 +99,9 @@ def test_choose_normalization(controller_factory, inputs, expected):
 @pytest.mark.parametrize(
     "inputs, expected",
     [
-        (["1"], "1"),
-        (["2"], "2"),
-        (["x", "2"], "2"),
+        (["1"], "1"),       # Valid choice
+        (["2"], "2"),       # Valid choice
+        (["x", "2"], "2"),  # Invalid input followed by valid choice
     ],
 )
 def test_choose_word_source(controller_factory, inputs, expected):
@@ -116,9 +116,9 @@ def test_choose_word_source(controller_factory, inputs, expected):
 @pytest.mark.parametrize(
     "inputs, expected",
     [
-        (["easy"], "EASY"),
-        (["HARD"], "HARD"),
-        (["wrong", "medium"], "MEDIUM"),
+        (["easy"], "EASY"),                 # Valid choice in lowercase
+        (["HARD"], "HARD"),                 # Valid choice in uppercase
+        (["wrong", "medium"], "MEDIUM"),    # Invalid input followed by valid choice
     ],
 )
 def test_choose_difficulty(controller_factory, inputs, expected):
@@ -133,9 +133,9 @@ def test_choose_difficulty(controller_factory, inputs, expected):
 @pytest.mark.parametrize(
     "inputs, expected",
     [
-        (["Y"], True),
-        (["N"], False),
-        (["invalid", "N"], False),
+        (["Y"], True),              # Accept reset session
+        (["N"], False),             # Decline reset session
+        (["invalid", "N"], False),  # Invalid input followed by valid decline
     ],
 )
 def test_choose_reset_session(controller_factory, inputs, expected):
