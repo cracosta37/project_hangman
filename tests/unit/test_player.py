@@ -3,7 +3,7 @@ from hangman.model.player import Player
 
 
 # ======================================================
-# Core Factory Fixture
+# CORE FACTORY FIXTURE
 # ======================================================
 
 @pytest.fixture
@@ -26,7 +26,7 @@ def make_player():
 
 
 # ======================================================
-# Semantic Fixtures (State-Oriented)
+# SEMANTIC FIXTURES (STATE-ORIENTED)
 # ======================================================
 
 @pytest.fixture
@@ -47,7 +47,7 @@ def dead_player(make_player):
 
 
 # ======================================================
-# Constructor Behavior
+# CONSTRUCTOR BEHAVIOR
 # ======================================================
 
 @pytest.mark.parametrize(
@@ -72,7 +72,7 @@ def test_health_starts_equal_to_max_health(player):
 
 
 # ======================================================
-# Health Decrement Logic (lose_health)
+# HEALTH DECREMENT LOGIC (LOSE_HEALTH)
 # ======================================================
 
 
@@ -116,7 +116,7 @@ def test_lose_health_is_idempotent_at_zero(make_player):
 
 
 # ======================================================
-# Life State Logic (is_alive)
+# LIFE STATE LOGIC (IS_ALIVE)
 # ======================================================
 
 @pytest.mark.parametrize(
