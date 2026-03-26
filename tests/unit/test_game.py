@@ -3,7 +3,7 @@ from hangman.model.game import Game
 
 
 # -----------------------------
-# Fixtures
+# FIXTURES
 # -----------------------------
 
 class DummyConstants:
@@ -30,7 +30,7 @@ def prepared_game(game_with_players):
 
 
 # -----------------------------
-# Initialization Tests
+# INITIALIZATION TESTS
 # -----------------------------
 
 def test_game_initializes_remaining_letters(game):
@@ -46,7 +46,7 @@ def test_extended_alphabet_when_normalization_disabled(constants):
 
 
 # -----------------------------
-# Normalization Tests
+# NORMALIZATION TESTS
 # -----------------------------
 
 @pytest.mark.parametrize(
@@ -72,7 +72,7 @@ def test_normalize_disabled_keeps_accents(constants):
 
 
 # -----------------------------
-# Word Setting Tests
+# WORD SETTING TESTS
 # -----------------------------
 
 @pytest.mark.parametrize(
@@ -98,7 +98,7 @@ def test_set_word_detects_phrase(game):
 
 
 # -----------------------------
-# Reset For New Round Tests
+# RESET FOR NEW ROUND TESTS
 # -----------------------------
 
 def test_reset_for_new_round_success(prepared_game):
@@ -162,7 +162,7 @@ def test_reset_for_new_round_restores_remaining_players(prepared_game):
 
 
 # -----------------------------
-# Player Management Tests
+# PLAYER MANAGEMENT TESTS
 # -----------------------------
 
 def test_create_players_requires_nonempty_list(game):
@@ -191,7 +191,7 @@ def test_create_players_success(game):
 
 
 # -----------------------------
-# Letter Guessing Tests
+# LETTER GUESSING TESTS
 # -----------------------------
 
 def test_guess_letter_invalid_player_index(prepared_game):
@@ -254,7 +254,7 @@ def test_guess_letter_wins_game(prepared_game):
 
 
 # -----------------------------
-# Word Guessing Tests
+# WORD GUESSING TESTS
 # -----------------------------
 
 def test_guess_word_invalid_player_index(prepared_game):
@@ -315,7 +315,7 @@ def test_guess_word_correct_guess(prepared_game):
 
 
 # -----------------------------
-# Game State & Utility Tests
+# GAME STATE & UTILITY TESTS
 # -----------------------------
 
 def test_word_label_returns_word(game):
