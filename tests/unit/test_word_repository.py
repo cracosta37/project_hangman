@@ -5,7 +5,7 @@ from hangman.services.word_repository import WordRepository
 
 
 # -----------------------------
-# Core Fixtures (Factories)
+# CORE FIXTURES (FACTORIES)
 # -----------------------------
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def make_repo(make_json_file):
 
 
 # -----------------------------
-# Semantic Fixtures
+# SEMANTIC FIXTURES
 # -----------------------------
 
 @pytest.fixture
@@ -52,7 +52,7 @@ def empty_repo(tmp_path):
 
 
 # -----------------------------
-# Initialization Tests
+# INITIALIZATION TESTS
 # -----------------------------
 
 def test_init_with_valid_dict(make_repo):
@@ -92,7 +92,7 @@ def test_invalid_root_types(make_repo, invalid_root):
 
 
 # -----------------------------
-# Loading Tests
+# LOADING TESTS
 # -----------------------------
 
 def test_load_dict_structure(make_repo):
@@ -160,7 +160,7 @@ def test_dict_filtering(make_repo, data, expected_easy, expected_medium):
 
 
 # -----------------------------
-# Validation Tests
+# VALIDATION TESTS
 # -----------------------------
 
 @pytest.mark.parametrize("value,expected", [
@@ -190,7 +190,7 @@ def test_validate_normalize_length_bounds(empty_repo):
 
 
 # -----------------------------
-# Normalization Tests
+# NORMALIZATION TESTS
 # -----------------------------
 
 @pytest.mark.parametrize("input_text,expected", [
@@ -213,7 +213,7 @@ def test_normalize_for_internal_idempotent():
 
 
 # -----------------------------
-# Public API Tests
+# PUBLIC API TESTS
 # -----------------------------
 
 def test_get_by_difficulty_returns_valid(repo_with_words):
