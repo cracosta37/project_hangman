@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import Mock
+from unittest.mock import patch, Mock
 
 from hangman.controller.game_controller import GameController
 
@@ -362,11 +362,11 @@ def test_start_resets_word_session(controller_factory):
     controller.run_game_loop = Mock()
 
     view.prompt.side_effect = [
-        "Y",  # continue
-        "Y",  # reset session
-        "1",  # word source
-        "word",  # new word
-        "N",  # exit next loop
+        "Y",    # continue
+        "Y",    # reset session
+        "1",    # word source
+        "word", # new word
+        "N",    # exit next loop
     ]
 
     controller.start()
@@ -381,20 +381,22 @@ def test_start_resets_word_session(controller_factory):
 def test_setup_game_retries_invalid_player_count(controller_factory):
     controller, view = controller_factory()
 
-    controller.game = Mock()
-    controller.game.set_word.return_value = {"ok": True}
-    controller.game.create_players.return_value = {"ok": True}
+    mock_game = Mock()
+    mock_game.set_word.return_value = {"ok": True}
+    mock_game.create_players.return_value = {"ok": True}
 
-    view.prompt.side_effect = [
-        "Y",   # normalization
-        "1",   # word source
-        "word",
-        "0",   # invalid players
-        "2",   # valid players
-        "Alice",
-        "Bob",
-    ]
+    with patch("hangman.controller.game_controller.Game", return_value=mock_game):
+        view.prompt.side_effect = [
+            "Y",   # normalization
+            "1",   # word source
+            "0",   # invalid players
+            "2",   # valid players
+            "Alice",
+            "Bob",
+        ]
 
-    controller.setup_game()
+        view.prompt_hidden.return_value = "word"
 
-    controller.game.create_players.assert_called_with(["Alice", "Bob"])
+        controller.setup_game()
+
+    mock_game.create_players.assert_called_with(["Alice", "Bob"])
