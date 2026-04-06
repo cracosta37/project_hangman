@@ -148,7 +148,7 @@ def test_choose_reset_session(controller_factory, inputs, expected):
 
 
 # ==========================================================
-# INTERNAL HELPERS
+# ERROR DETECTION
 # ==========================================================
 
 def test_is_exhaustion_error_detects_correct_message(controller_factory):
@@ -165,6 +165,66 @@ def test_is_exhaustion_error_rejects_other_errors(controller_factory):
     error = ValueError("Some other error")
 
     assert controller._is_exhaustion_error(error) is False
+
+
+# ==========================================================
+# SETUP GAME (CONFIGURATION FLOW)
+# ==========================================================
+
+def test_setup_game_retries_invalid_player_count(controller_factory):
+    controller, view = controller_factory()
+
+    mock_game = Mock()
+    mock_game.set_word.return_value = {"ok": True}
+    mock_game.create_players.return_value = {"ok": True}
+
+    with patch("hangman.controller.game_controller.Game", return_value=mock_game):
+        view.prompt.side_effect = [
+            "Y",   # normalization
+            "1",   # word source
+            "0",   # invalid players
+            "2",   # valid players
+            "Alice",
+            "Bob",
+        ]
+
+        view.prompt_hidden.return_value = "word"
+
+        controller.setup_game()
+
+    mock_game.create_players.assert_called_with(["Alice", "Bob"])
+
+
+# ==========================================================
+# GAME LOOP (MAIN CONTROL FLOW)
+# ==========================================================
+
+def test_run_game_loop_exits_when_game_over(controller_factory):
+    controller, view = controller_factory()
+
+    controller.game.is_game_over.return_value = True
+
+    controller.run_game_loop()
+
+    view.pause.assert_called()
+
+
+def test_run_game_loop_handles_winner(controller_factory):
+    controller, view = controller_factory()
+
+    controller.game.is_game_over.side_effect = [False, True]
+    controller.game.remaining_players = 1
+
+    controller.handle_letter_guess = Mock(return_value={
+        "game_won": True,
+        "winner": 0,
+    })
+
+    view.prompt.return_value = "1"
+
+    controller.run_game_loop()
+
+    view.display.assert_any_call("Congratulations, Alice! You won!\n")
 
 
 # ==========================================================
@@ -306,39 +366,7 @@ def test_handle_word_guess_non_recoverable_error(controller_factory):
 
 
 # ==========================================================
-# GAME LOOP (CONTROL FLOW)
-# ==========================================================
-
-def test_run_game_loop_exits_when_game_over(controller_factory):
-    controller, view = controller_factory()
-
-    controller.game.is_game_over.return_value = True
-
-    controller.run_game_loop()
-
-    view.pause.assert_called()
-
-
-def test_run_game_loop_handles_winner(controller_factory):
-    controller, view = controller_factory()
-
-    controller.game.is_game_over.side_effect = [False, True]
-    controller.game.remaining_players = 1
-
-    controller.handle_letter_guess = Mock(return_value={
-        "game_won": True,
-        "winner": 0,
-    })
-
-    view.prompt.return_value = "1"
-
-    controller.run_game_loop()
-
-    view.display.assert_any_call("Congratulations, Alice! You won!\n")
-
-
-# ==========================================================
-# START / APPLICATION FLOW
+# START METHOD (ENTRY POINT AND HIGH-LEVEL CONTROL FLOW)
 # ==========================================================
 
 def test_start_exits_when_user_declines_new_game(controller_factory):
@@ -372,31 +400,3 @@ def test_start_resets_word_session(controller_factory):
     controller.start()
 
     controller.word_repo.reset_session.assert_called()
-
-
-# ==========================================================
-# EDGE CASES
-# ==========================================================
-
-def test_setup_game_retries_invalid_player_count(controller_factory):
-    controller, view = controller_factory()
-
-    mock_game = Mock()
-    mock_game.set_word.return_value = {"ok": True}
-    mock_game.create_players.return_value = {"ok": True}
-
-    with patch("hangman.controller.game_controller.Game", return_value=mock_game):
-        view.prompt.side_effect = [
-            "Y",   # normalization
-            "1",   # word source
-            "0",   # invalid players
-            "2",   # valid players
-            "Alice",
-            "Bob",
-        ]
-
-        view.prompt_hidden.return_value = "word"
-
-        controller.setup_game()
-
-    mock_game.create_players.assert_called_with(["Alice", "Bob"])
