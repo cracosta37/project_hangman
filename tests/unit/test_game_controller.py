@@ -248,6 +248,29 @@ def test_handle_letter_guess_correct(controller_factory):
     view.display.assert_called()
 
 
+def test_handle_letter_guess_incorrect_not_eliminated(controller_factory):
+    controller, view = controller_factory()
+
+    controller.game.guess_letter.return_value = {
+        "ok": True,
+        "correct": False,
+        "eliminated": False,
+    }
+
+    view.prompt.return_value = "z"
+
+    result = controller.handle_letter_guess(0)
+
+    assert result["correct"] is False
+
+    view.display.assert_any_call("Sorry, the letter 'Z' is not in the word.\n")
+
+    for call in view.display.call_args_list:
+        assert "has been eliminated" not in call.args[0]
+
+    view.pause.assert_called()
+
+
 def test_handle_letter_guess_incorrect_and_eliminated(controller_factory):
     controller, view = controller_factory()
 
@@ -314,6 +337,29 @@ def test_handle_word_guess_correct(controller_factory):
     result = controller.handle_word_guess(0)
 
     assert result["correct"] is True
+
+
+def test_handle_word_guess_incorrect_not_eliminated(controller_factory):
+    controller, view = controller_factory()
+
+    controller.game.guess_word.return_value = {
+        "ok": True,
+        "correct": False,
+        "eliminated": False,
+    }
+
+    view.prompt.return_value = "wrong"
+
+    result = controller.handle_word_guess(0)
+
+    assert result["correct"] is False
+
+    view.display.assert_any_call("Sorry, 'WRONG' is not the correct word.\n")
+
+    for call in view.display.call_args_list:
+        assert "has been eliminated" not in call.args[0]
+
+    view.pause.assert_called()
 
 
 def test_handle_word_guess_incorrect_and_eliminated(controller_factory):
