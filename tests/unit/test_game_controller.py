@@ -387,7 +387,7 @@ def test_handle_word_guess_repeat_retry(controller_factory):
         {"ok": True, "correct": True},
     ]
 
-    view.prompt.side_effect = ["a", "b"]
+    view.prompt.side_effect = ["repeated_guess", "valid_guess"]
 
     result = controller.handle_word_guess(0)
 
@@ -403,7 +403,7 @@ def test_handle_word_guess_non_recoverable_error(controller_factory):
         "error": "Invalid",
     }
 
-    view.prompt.return_value = "!"
+    view.prompt.return_value = "invalid!"
 
     result = controller.handle_word_guess(0)
 
