@@ -195,6 +195,86 @@ def test_setup_game_retries_invalid_player_count(controller_factory):
     mock_game.create_players.assert_called_with(["Alice", "Bob"])
 
 
+def test_setup_game_retries_invalid_word(controller_factory):
+    controller, view = controller_factory()
+
+    mock_game = Mock()
+    mock_game.set_word.side_effect = [
+        {"ok": False, "error": "Invalid"},
+        {"ok": True},
+    ]
+    mock_game.create_players.return_value = {"ok": True}
+
+    with patch("hangman.controller.game_controller.Game", return_value=mock_game):
+        view.prompt.side_effect = ["Y", "1", "1", "Alice"]
+        view.prompt_hidden.side_effect = ["bad", "good"]
+
+        controller.setup_game()
+
+    assert mock_game.set_word.call_count == 2
+
+
+def test_setup_game_automatic_word_selection(controller_factory):
+    controller, view = controller_factory()
+
+    mock_game = Mock()
+    mock_game.set_word.return_value = {"ok": True}
+    mock_game.create_players.return_value = {"ok": True}
+
+    controller.word_repo.get_by_difficulty.return_value = "TEST"
+
+    with patch("hangman.controller.game_controller.Game", return_value=mock_game):
+        view.prompt.side_effect = ["Y", "2", "easy", "1", "Alice"]
+
+        controller.setup_game()
+
+    controller.word_repo.get_by_difficulty.assert_called_with("EASY")
+
+def test_setup_game_retries_invalid_player_input(controller_factory):
+    controller, view = controller_factory()
+
+    mock_game = Mock()
+    mock_game.set_word.return_value = {"ok": True}
+    mock_game.create_players.return_value = {"ok": True}
+
+    with patch("hangman.controller.game_controller.Game", return_value=mock_game):
+        view.prompt.side_effect = [
+            "Y", "1",
+            "abc",   # invalid
+            "1",     # valid
+            "Alice"
+        ]
+        view.prompt_hidden.return_value = "word"
+
+        controller.setup_game()
+
+    view.display.assert_any_call("Invalid input. Please enter an integer.\n")
+
+
+def test_setup_game_rejects_duplicate_player_names(controller_factory):
+    controller, view = controller_factory()
+
+    mock_game = Mock()
+    mock_game.set_word.return_value = {"ok": True}
+    mock_game.create_players.return_value = {"ok": True}
+
+    with patch("hangman.controller.game_controller.Game", return_value=mock_game):
+        view.prompt.side_effect = [
+            "Y", "1",
+            "2",
+            "Alice",
+            "Alice",  # duplicate
+            "Bob"
+        ]
+        view.prompt_hidden.return_value = "word"
+
+        controller.setup_game()
+
+    view.display.assert_any_call(
+        "That name is already taken. Please choose another name.\n"
+    )
+
+
 # ==========================================================
 # GAME LOOP (MAIN CONTROL FLOW)
 # ==========================================================
@@ -387,7 +467,7 @@ def test_handle_word_guess_repeat_retry(controller_factory):
         {"ok": True, "correct": True},
     ]
 
-    view.prompt.side_effect = ["repeated_guess", "valid_guess"]
+    view.prompt.side_effect = ["repeated", "valid"]
 
     result = controller.handle_word_guess(0)
 
