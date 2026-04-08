@@ -52,6 +52,7 @@ def test_clear_executes_correct_command(view, monkeypatch, os_name, expected_cmd
 
     view.clear()
 
+    assert len(calls) == 1
     assert calls == [expected_cmd]
 
 
