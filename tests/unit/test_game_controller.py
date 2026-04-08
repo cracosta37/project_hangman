@@ -279,6 +279,55 @@ def test_setup_game_rejects_duplicate_player_names(controller_factory):
 # GAME LOOP (MAIN CONTROL FLOW)
 # ==========================================================
 
+def test_run_game_loop_skips_eliminated_player(controller_factory):
+    controller, _ = controller_factory()
+
+    dead_player = Mock()
+    dead_player.is_alive.return_value = False
+
+    controller.game.get_player.return_value = dead_player
+    controller.game.is_game_over.side_effect = [False, True]
+
+    # If no crash → behavior is correct
+    controller.run_game_loop()
+
+
+def test_run_game_loop_letter_triggers_word_guess_option(controller_factory):
+    controller, view = controller_factory()
+
+    controller.game.is_game_over.side_effect = [False, True]
+
+    controller.handle_letter_guess = Mock(return_value={
+        "correct": True,
+        "game_won": False
+    })
+
+    controller.handle_word_guess = Mock(return_value={
+        "correct": False,
+        "game_won": False
+    })
+
+    view.prompt.side_effect = [
+        "1",  # choose letter
+        "Y",  # choose to guess word
+    ]
+
+    controller.run_game_loop()
+
+    controller.handle_word_guess.assert_called()
+
+
+def test_run_game_loop_all_players_eliminated(controller_factory):
+    controller, view = controller_factory()
+
+    controller.game.is_game_over.return_value = False
+    controller.game.remaining_players = 0
+
+    controller.run_game_loop()
+
+    view.display.assert_any_call("All players have been eliminated. Game over.\n")
+
+
 def test_run_game_loop_exits_when_game_over(controller_factory):
     controller, view = controller_factory()
 
@@ -509,6 +558,20 @@ def test_start_exits_when_user_declines_new_game(controller_factory):
     controller.exit_game.assert_called_once()
 
 
+def test_start_retries_invalid_continue_input(controller_factory):
+    controller, view = controller_factory()
+
+    controller.setup_game = Mock()
+    controller.run_game_loop = Mock()
+    controller.exit_game = Mock()
+
+    view.prompt.side_effect = ["invalid", "N"]
+
+    controller.start()
+
+    view.display.assert_any_call("Invalid input. Please choose Y or N.\n")
+
+
 def test_start_resets_word_session(controller_factory):
     controller, view = controller_factory()
 
@@ -526,3 +589,48 @@ def test_start_resets_word_session(controller_factory):
     controller.start()
 
     controller.word_repo.reset_session.assert_called()
+
+
+def test_start_continue_without_reset(controller_factory):
+    controller, view = controller_factory()
+
+    controller.setup_game = Mock()
+    controller.run_game_loop = Mock()
+
+    view.prompt.side_effect = [
+        "Y",    # continue
+        "N",    # do not reset
+        "1",    # word source
+        "word", # new word
+        "N"     # exit next loop
+    ]
+
+    controller.start()
+
+    controller.word_repo.reset_session.assert_not_called()
+
+
+def test_start_exhaustion_exit_option(controller_factory):
+    controller, view = controller_factory()
+
+    controller.setup_game = Mock()
+    controller.run_game_loop = Mock()
+
+    controller.word_repo.get_by_difficulty.side_effect = ValueError(
+        "No unused words remaining"
+    )
+
+    view.prompt.side_effect = [
+        "Y",      # continue
+        "N",      # no reset
+        "2",      # automatic
+        "easy",   # difficulty
+    ]
+
+    view.get_choice.return_value = "3"  # exit
+
+    controller.exit_game = Mock()
+
+    controller.start()
+
+    controller.exit_game.assert_called()
