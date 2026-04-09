@@ -1,6 +1,6 @@
 import pytest
 from typing import List
-from view_interface import View
+from hangman.view.view_interface import View
 
 
 # ============================================================
