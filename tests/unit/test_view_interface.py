@@ -1,4 +1,5 @@
 import pytest
+import inspect
 from typing import List
 from hangman.view.view_interface import View
 
@@ -60,6 +61,24 @@ def test_prompt_hidden_return_type_contract():
 def test_display_return_type_contract():
     """display() should declare a None return type."""
     assert View.display.__annotations__["return"] is None
+
+
+def test_display_signature():
+    """display() should accept exactly one argument besides self."""
+    sig = inspect.signature(View.display)
+    params = list(sig.parameters.values())
+
+    assert len(params) == 2  # self + message
+    assert params[1].name == "message"
+
+
+def test_pause_signature():
+    """pause() should have a default message argument."""
+    sig = inspect.signature(View.pause)
+    params = list(sig.parameters.values())
+
+    assert len(params) == 2
+    assert params[1].default == "Press Enter to continue..."
 
 
 def test_display_requires_message(view_instance):
