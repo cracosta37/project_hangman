@@ -141,6 +141,20 @@ def test_show_word_edge_cases(view_instance, word_state: List[str]):
         view_instance.show_word(word_state)
 
 
+@pytest.mark.parametrize("invalid_input", [None, 123, [], {}])
+def test_display_invalid_types(view_instance, invalid_input):
+    """display() should handle invalid input types at contract level."""
+    with pytest.raises(NotImplementedError):
+        view_instance.display(invalid_input)
+
+
+@pytest.mark.parametrize("invalid_input", [None, "string", 123])
+def test_show_word_invalid_types(view_instance, invalid_input):
+    """show_word() should receive a list-like structure."""
+    with pytest.raises(NotImplementedError):
+        view_instance.show_word(invalid_input)
+
+
 # ============================================================
 # INTERFACE CONSISTENCY TESTS
 # ============================================================
