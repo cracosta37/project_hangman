@@ -47,6 +47,21 @@ def test_all_methods_raise_not_implemented(view_instance, method_name, args):
 # METHOD SIGNATURE VALIDATION
 # ============================================================
 
+def test_prompt_return_type_contract():
+    """prompt() should declare a string return type."""
+    assert View.prompt.__annotations__["return"] is str
+
+
+def test_prompt_hidden_return_type_contract():
+    """prompt_hidden() should declare a string return type."""
+    assert View.prompt_hidden.__annotations__["return"] is str
+
+
+def test_display_return_type_contract():
+    """display() should declare a None return type."""
+    assert View.display.__annotations__["return"] is None
+
+
 def test_display_requires_message(view_instance):
     """display() should require exactly one argument."""
     with pytest.raises(TypeError):
