@@ -3,7 +3,7 @@ import run as run_module
 
 
 # ============================================================
-# Section: Factory Fixtures
+# FACTORY FIXTURES
 # ============================================================
 
 @pytest.fixture
@@ -34,7 +34,7 @@ def mock_controller_factory(mocker):
 
 
 # ============================================================
-# Section: Semantic Fixtures
+# SEMANTIC FIXTURES
 # ============================================================
 
 @pytest.fixture
@@ -58,7 +58,7 @@ def patched_dependencies(monkeypatch, mock_view_factory, mock_controller_factory
 
 
 # ============================================================
-# Section: Core Integration Tests
+# CORE INTEGRATION TESTS
 # ============================================================
 
 def test_run_creates_view_instance(patched_dependencies):
@@ -88,7 +88,7 @@ def test_run_calls_controller_start(patched_dependencies):
 
 
 # ============================================================
-# Section: Interaction Order & Contract Tests
+# SINTERACTION ORDER & CONTRACT TESTS
 # ============================================================
 
 def test_run_execution_order(mocker, monkeypatch):
@@ -131,7 +131,7 @@ def test_run_execution_order(mocker, monkeypatch):
 
 
 # ============================================================
-# Section: Parametrized Robustness Tests
+# PARAMETRIZED ROBUSTNESS TESTS
 # ============================================================
 
 @pytest.mark.parametrize("exception_stage", ["view", "controller", "start"])
@@ -179,7 +179,7 @@ def test_run_propagates_exceptions(mocker, monkeypatch, exception_stage):
 
 
 # ============================================================
-# Section: __main__ Execution Path
+# __MAIN__ EXECUTION PATH
 # ============================================================
 
 def test_main_executes_run(monkeypatch, mocker):
