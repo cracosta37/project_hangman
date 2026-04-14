@@ -120,7 +120,7 @@ def test_pause_custom_argument(view_instance):
 
 @pytest.mark.parametrize(
     "message",
-    ["", " ", "Test message"],
+    ["", " ", "\n", "\t", "a" * 1000, "Test message"],
 )
 def test_display_edge_cases(view_instance, message):
     """display() should handle various string inputs (contract-level)."""
