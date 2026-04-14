@@ -81,34 +81,16 @@ def test_pause_signature():
     assert params[1].default == "Press Enter to continue..."
 
 
-def test_display_requires_message(view_instance):
-    """display() should require exactly one argument."""
+@pytest.mark.parametrize(
+    "method_name",
+    ["display", "prompt", "prompt_hidden", "show_word", "show_health"]
+)
+def test_methods_require_argument(view_instance, method_name):
+    """Methods requiring arguments should raise TypeError when missing."""
+    method = getattr(view_instance, method_name)
+
     with pytest.raises(TypeError):
-        view_instance.display()
-
-
-def test_prompt_requires_message(view_instance):
-    """prompt() should require exactly one argument."""
-    with pytest.raises(TypeError):
-        view_instance.prompt()
-
-
-def test_prompt_hidden_requires_message(view_instance):
-    """prompt_hidden() should require exactly one argument."""
-    with pytest.raises(TypeError):
-        view_instance.prompt_hidden()
-
-
-def test_show_word_requires_list(view_instance):
-    """show_word() should require one argument."""
-    with pytest.raises(TypeError):
-        view_instance.show_word()
-
-
-def test_show_health_requires_player(view_instance):
-    """show_health() should require one argument."""
-    with pytest.raises(TypeError):
-        view_instance.show_health()
+        method()
 
 
 # ============================================================
