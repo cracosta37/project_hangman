@@ -175,6 +175,16 @@ def test_show_word_invalid_types(view_instance, invalid_input):
 
 
 # ============================================================
+# INTERFACE INSTANTIATION BEHAVIOR
+# ============================================================
+
+def test_view_is_instantiable():
+    """The interface can currently be instantiated (non-ABC design)."""
+    view = View()
+    assert isinstance(view, View)
+
+
+# ============================================================
 # INTERFACE CONSISTENCY TESTS
 # ============================================================
 
