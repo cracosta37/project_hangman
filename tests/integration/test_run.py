@@ -179,7 +179,7 @@ def test_run_propagates_exceptions(mocker, monkeypatch, exception_stage):
 
 
 # ============================================================
-# __MAIN__ EXECUTION PATH
+# __main__ EXECUTION PATH
 # ============================================================
 
 def test_main_executes_run(monkeypatch, mocker):
