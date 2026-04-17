@@ -1,4 +1,5 @@
 import pytest
+import runpy
 import run as run_module
 
 
@@ -184,17 +185,27 @@ def test_run_propagates_exceptions(mocker, monkeypatch, exception_stage):
 
 def test_main_executes_run(monkeypatch, mocker):
     """
-    Simulates running the module as a script.
+    Tests that when run.py is executed as __main__, it calls run() and thus starts the game.
     """
 
-    mock_run = mocker.Mock()
-    monkeypatch.setattr(run_module, "run", mock_run)
+    # Mock controller instance
+    mock_controller = mocker.Mock()
+    mock_controller.start = mocker.Mock()
 
-    # Simulate __main__ execution
-    monkeypatch.setattr(run_module, "__name__", "__main__")
+    # Mock classes
+    mock_controller_class = mocker.Mock(return_value=mock_controller)
+    mock_view_class = mocker.Mock()
 
-    # Reload logic manually (since Python won't re-run module automatically)
-    if run_module.__name__ == "__main__":
-        run_module.run()
+    # Patch ORIGINAL import sources
+    monkeypatch.setattr(
+        "hangman.controller.game_controller.GameController",
+        mock_controller_class
+    )
+    monkeypatch.setattr(
+        "hangman.view.console_view.ConsoleView",
+        mock_view_class
+    )
 
-    mock_run.assert_called_once_with()
+    runpy.run_module("run", run_name="__main__")
+
+    mock_controller.start.assert_called_once()
