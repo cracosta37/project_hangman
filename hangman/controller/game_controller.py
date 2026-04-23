@@ -1,7 +1,6 @@
 from hangman.model.game import Game
 from hangman.view.console_view import ConsoleView
 from hangman.services.word_repository import WordRepository
-from hangman import constants
 
 from pathlib import Path
 
