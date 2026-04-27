@@ -275,6 +275,67 @@ def test_setup_game_rejects_duplicate_player_names(controller_factory):
     )
 
 
+def test_setup_game_sets_single_player_flag(controller_factory):
+    controller, view = controller_factory()
+
+    mock_game = Mock()
+    mock_game.set_word.return_value = {"ok": True}
+    mock_game.create_players.return_value = {"ok": True}
+
+    with patch("hangman.controller.game_controller.Game", return_value=mock_game):
+        view.prompt.side_effect = [
+            "Y", "1",
+            "1",     # one player
+            "Alice"
+        ]
+        view.prompt_hidden.return_value = "word"
+
+        controller.setup_game()
+
+    assert controller.single_player is True
+
+
+def test_setup_game_multi_player_prompt(controller_factory):
+    controller, view = controller_factory()
+
+    mock_game = Mock()
+    mock_game.set_word.return_value = {"ok": True}
+    mock_game.create_players.return_value = {"ok": True}
+
+    with patch("hangman.controller.game_controller.Game", return_value=mock_game):
+        view.prompt.side_effect = [
+            "Y", "1",
+            "2",
+            "Alice",
+            "Bob"
+        ]
+        view.prompt_hidden.return_value = "word"
+
+        controller.setup_game()
+
+    view.prompt.assert_any_call("Please insert the name of player 1: ")
+
+
+def test_setup_game_single_player_prompt(controller_factory):
+    controller, view = controller_factory()
+
+    mock_game = Mock()
+    mock_game.set_word.return_value = {"ok": True}
+    mock_game.create_players.return_value = {"ok": True}
+
+    with patch("hangman.controller.game_controller.Game", return_value=mock_game):
+        view.prompt.side_effect = [
+            "Y", "1",
+            "1",
+            "Alice"
+        ]
+        view.prompt_hidden.return_value = "word"
+
+        controller.setup_game()
+
+    view.prompt.assert_any_call("Please insert the name of the player: ")
+
+
 # ==========================================================
 # GAME LOOP (MAIN CONTROL FLOW)
 # ==========================================================
@@ -290,6 +351,22 @@ def test_run_game_loop_skips_eliminated_player(controller_factory):
 
     # If no crash → behavior is correct
     controller.run_game_loop()
+
+
+def test_run_game_loop_displays_player_label(controller_factory):
+    controller, view = controller_factory()
+
+    controller.game.is_game_over.side_effect = [False, True]
+    view.prompt.return_value = "1"
+
+    controller.handle_letter_guess = Mock(return_value={
+        "correct": False,
+        "game_won": False
+    })
+
+    controller.run_game_loop()
+
+    view.display.assert_any_call("Player: Alice.\n")
 
 
 def test_run_game_loop_letter_triggers_word_guess_option(controller_factory):
@@ -320,12 +397,29 @@ def test_run_game_loop_letter_triggers_word_guess_option(controller_factory):
 def test_run_game_loop_all_players_eliminated(controller_factory):
     controller, view = controller_factory()
 
+    controller.single_player = False
     controller.game.is_game_over.return_value = False
     controller.game.remaining_players = 0
 
     controller.run_game_loop()
 
-    view.display.assert_any_call("All players have been eliminated. Game over.\n")
+    view.display.assert_any_call("All players have been eliminated.\n")
+    view.display.assert_any_call("    GAME OVER\n")
+
+
+def test_run_game_loop_single_player_game_over(controller_factory):
+    controller, view = controller_factory()
+
+    controller.single_player = True
+    controller.game.is_game_over.return_value = False
+    controller.game.remaining_players = 0
+
+    controller.run_game_loop()
+
+    view.display.assert_any_call("    GAME OVER\n")
+
+    for call in view.display.call_args_list:
+        assert "All players have been eliminated" not in call.args[0]
 
 
 def test_run_game_loop_exits_when_game_over(controller_factory):
@@ -353,6 +447,7 @@ def test_run_game_loop_handles_winner(controller_factory):
 
     controller.run_game_loop()
 
+    view.clear.assert_called()
     view.display.assert_any_call("Congratulations, Alice! You won!\n")
 
 
@@ -403,6 +498,7 @@ def test_handle_letter_guess_incorrect_not_eliminated(controller_factory):
 def test_handle_letter_guess_incorrect_and_eliminated(controller_factory):
     controller, view = controller_factory()
 
+    controller.single_player = False
     controller.game.guess_letter.return_value = {
         "ok": True,
         "correct": False,
@@ -415,6 +511,24 @@ def test_handle_letter_guess_incorrect_and_eliminated(controller_factory):
 
     assert result["correct"] is False
     view.display.assert_any_call("Alice has been eliminated.\n")
+
+
+def test_handle_letter_guess_single_player_elimination(controller_factory):
+    controller, view = controller_factory()
+
+    controller.single_player = True
+
+    controller.game.guess_letter.return_value = {
+        "ok": True,
+        "correct": False,
+        "eliminated": True,
+    }
+
+    view.prompt.return_value = "z"
+
+    controller.handle_letter_guess(0)
+
+    view.display.assert_any_call("You have been eliminated.\n")
 
 
 def test_handle_letter_guess_repeat_retry(controller_factory):
@@ -494,6 +608,7 @@ def test_handle_word_guess_incorrect_not_eliminated(controller_factory):
 def test_handle_word_guess_incorrect_and_eliminated(controller_factory):
     controller, view = controller_factory()
 
+    controller.single_player = False
     controller.game.guess_word.return_value = {
         "ok": True,
         "correct": False,
@@ -506,6 +621,24 @@ def test_handle_word_guess_incorrect_and_eliminated(controller_factory):
 
     assert result["correct"] is False
     view.display.assert_any_call("Alice has been eliminated.\n")
+
+
+def test_handle_word_guess_single_player_elimination(controller_factory):
+    controller, view = controller_factory()
+
+    controller.single_player = True
+
+    controller.game.guess_word.return_value = {
+        "ok": True,
+        "correct": False,
+        "eliminated": True,
+    }
+
+    view.prompt.return_value = "wrong"
+
+    controller.handle_word_guess(0)
+
+    view.display.assert_any_call("You have been eliminated.\n")
 
 
 def test_handle_word_guess_repeat_retry(controller_factory):
