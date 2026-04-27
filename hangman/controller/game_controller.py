@@ -17,6 +17,7 @@ class GameController:
         self.view = view
         self.c = constants_module
         self.game = None
+        self.single_player = False
 
         self.word_repo = WordRepository(BASE_DIR / "data" / "word_bank.json")
     
@@ -113,10 +114,17 @@ class GameController:
                 self.view.display("Invalid input. Please enter an integer.\n")
                 continue
 
+            self.single_player = (n == 1)
+
             names = []
             for i in range(1, n + 1):
                 while True:
-                    name = self.view.prompt(f"Please insert the name of player {i}: ").strip().title()
+                    if self.single_player:
+                        prompt_msg = "Please insert the name of the player: "
+                    else:
+                        prompt_msg = f"Please insert the name of player {i}: "
+
+                    name = self.view.prompt(prompt_msg).strip().title()
                     if not name:
                         self.view.display("Name cannot be empty.\n")
                         continue
@@ -150,7 +158,7 @@ class GameController:
                 continue
 
             self.view.clear()
-            self.view.display(f"Turn of {player.name}.\n")
+            self.view.display(f"Player: {player.name}.\n")
             self.view.show_health(player)
             self.view.show_word(self.game.get_visible_word())
 
@@ -201,9 +209,9 @@ class GameController:
         # ==================================================================
         # FINAL OUTCOME DISPLAY
         # ==================================================================
-
+        
+        self.view.clear()
         if winner_player is not None:
-            self.view.clear()
             self.view.display(f"Congratulations, {winner_player.name}! You won!\n")
             self.view.show_health(winner_player)
             self.view.show_word(self.game.get_visible_word())
@@ -215,7 +223,11 @@ class GameController:
             self.view.show_word(self.game.get_visible_word())
 
         else:
-            self.view.display("All players have been eliminated. Game over.\n")
+            if self.single_player:
+                self.view.display("    GAME OVER\n")
+            else:
+                self.view.display("All players have been eliminated.\n")
+                self.view.display("    GAME OVER\n")
 
         self.view.pause("Press Enter to continue...")
 
@@ -259,7 +271,10 @@ class GameController:
             self.view.show_word(self.game.get_visible_word())
 
             if result.get("eliminated"):
-                self.view.display(f"{player.name} has been eliminated.\n")
+                if self.single_player:
+                    self.view.display("You have been eliminated.\n")
+                else:
+                    self.view.display(f"{player.name} has been eliminated.\n")
 
             self.view.pause()
             return result
@@ -319,7 +334,10 @@ class GameController:
             self.view.show_word(self.game.get_visible_word())
 
             if result.get("eliminated"):
-                self.view.display(f"{player.name} has been eliminated.\n")
+                if self.single_player:
+                    self.view.display("You have been eliminated.\n")
+                else:
+                    self.view.display(f"{player.name} has been eliminated.\n")
 
             self.view.pause()
             return result
