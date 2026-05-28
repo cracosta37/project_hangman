@@ -1,1 +1,5 @@
+# Virtual environments
 .venv/
+
+# AI session transcripts
+docs/ai_sessions/
