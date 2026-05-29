@@ -22,6 +22,280 @@ F:\Online courses\Self study\Python\Object oriented programming\Project Hangman\
 │   └───v\...
 ├───.venv\...
 ├───docs\
+│   └───ai_sessions\
+│       ├───clean_masterclass1.md
+│       └───masterclass1.md
+├───hangman\
+│   ├───__init__.py
+│   ├───constants.py
+│   ├───__pycache__\...
+│   ├───controller\
+│   │   ├───__init__.py
+│   │   ├───game_controller.py
+│   │   └───__pycache__\...
+│   ├───data\
+│   │   ├───word_bank_long.json
+│   │   └───word_bank.json
+│   ├───model\
+│   │   ├───__init__.py
+│   │   ├───game.py
+│   │   ├───player.py
+│   │   └───__pycache__\...
+│   ├───services\
+│   │   ├───word_repository.py
+│   │   └───__pycache__\...
+│   └───view\
+│       ├───__init__.py
+│       ├───console_view.py
+│       ├───view_interface.py
+│       └───__pycache__\...
+└───tests\
+    ├───integration\
+    │   ├───test_run.py
+    │   └───__pycache__\...
+    └───unit\
+        ├───test_console_view.py
+        ├───test_game_controller.py
+        ├───test_game.py
+        ├───test_player.py
+        ├───test_view_interface.py
+        ├───test_word_repository.py
+        └───__pycache__\...
+Showing up to 200 items (files + folders). Folders or files indicated with ... contain more items not shown, were ignored, or the display limit (200 items) was reached.
+
+f:\Online courses\Self study\Python\Object oriented programming\Project Hangman\project_hangman\
+├───.gitignore
+├───pytest.ini
+├───run.py
+├───__pycache__\...
+├───.git\...
+├───.pytest_cache\
+│   ├───.gitignore
+│   ├───CACHEDIR.TAG
+│   ├───README.md
+│   └───v\
+│       └───cache\
+│           ├───lastfailed
+│           ├───nodeids
+│           └───stepwise
+├───.venv\
+│   ├───.gitignore
+│   ├───pyvenv.cfg
+│   ├───Include\
+│   ├───Lib\
+│   │   └───site-packages\
+│   │       ├───a1_coverage.pth
+│   │       ├───py.py
+│   │       ├───__pycache__\...
+│   │       ├───_pytest\
+│   │       │   ├───__init__.py
+│   │       │   ├───_argcomplete.py
+│   │       │   ├───_version.py
+│   │       │   ├───cacheprovider.py
+│   │       │   ├───capture.py
+│   │       │   ├───compat.py
+│   │       │   ├───debugging.py
+│   │       │   ├───deprecated.py
+│   │       │   ├───doctest.py
+│   │       │   ├───faulthandler.py
+│   │       │   ├───fixtures.py
+│   │       │   ├───freeze_support.py
+│   │       │   ├───helpconfig.py
+│   │       │   ├───hookspec.py
+│   │       │   ├───junitxml.py
+│   │       │   ├───legacypath.py
+│   │       │   ├───logging.py
+│   │       │   ├───main.py
+│   │       │   ├───monkeypatch.py
+│   │       │   ├───nodes.py
+│   │       │   ├───outcomes.py
+│   │       │   ├───pastebin.py
+│   │       │   ├───pathlib.py
+│   │       │   ├───py.typed
+│   │       │   ├───pytester_assertions.py
+│   │       │   ├───pytester.py
+│   │       │   ├───python_api.py
+│   │       │   ├───python.py
+│   │       │   ├───raises.py
+│   │       │   ├───recwarn.py
+│   │       │   ├───reports.py
+│   │       │   ├───runner.py
+│   │       │   ├───scope.py
+│   │       │   ├───setuponly.py
+│   │       │   ├───setupplan.py
+│   │       │   ├───skipping.py
+│   │       │   ├───stash.py
+│   │       │   ├───stepwise.py
+│   │       │   ├───subtests.py
+│   │       │   ├───terminal.py
+│   │       │   ├───terminalprogress.py
+│   │       │   ├───threadexception.py
+│   │       │   ├───timing.py
+│   │       │   ├───tmpdir.py
+│   │       │   ├───tracemalloc.py
+│   │       │   ├───unittest.py
+│   │       │   ├───unraisableexception.py
+│   │       │   ├───warning_types.py
+│   │       │   ├───warnings.py
+│   │       │   ├───__pycache__\...
+│   │       │   ├───_code\
+│   │       │   ├───_io\
+│   │       │   ├───_py\
+│   │       │   ├───assertion\
+│   │       │   ├───config\
+│   │       │   └───mark\
+│   │       ├───colorama\
+│   │       │   ├───__init__.py
+│   │       │   ├───ansi.py
+│   │       │   ├───ansitowin32.py
+│   │       │   ├───initialise.py
+│   │       │   ├───win32.py
+│   │       │   ├───winterm.py
+│   │       │   ├───__pycache__\...
+│   │       │   └───tests\
+│   │       ├───colorama-0.4.6.dist-info\
+│   │       │   ├───INSTALLER
+│   │       │   ├───METADATA
+│   │       │   ├───RECORD
+│   │       │   ├───WHEEL
+│   │       │   └───licenses\
+│   │       ├───coverage\
+│   │       │   ├───__init__.py
+│   │       │   ├───__main__.py
+│   │       │   ├───annotate.py
+│   │       │   ├───bytecode.py
+│   │       │   ├───cmdline.py
+│   │       │   ├───collector.py
+│   │       │   ├───config.py
+│   │       │   ├───context.py
+│   │       │   ├───control.py
+│   │       │   ├───core.py
+│   │       │   ├───data.py
+│   │       │   ├───debug.py
+│   │       │   ├───disposition.py
+│   │       │   ├───env.py
+│   │       │   ├───exceptions.py
+│   │       │   ├───execfile.py
+│   │       │   ├───files.py
+│   │       │   ├───html.py
+│   │       │   ├───inorout.py
+│   │       │   ├───jsonreport.py
+│   │       │   ├───lcovreport.py
+│   │       │   ├───misc.py
+│   │       │   ├───multiproc.py
+│   │       │   ├───numbits.py
+│   │       │   ├───parser.py
+│   │       │   ├───patch.py
+│   │       │   ├───phystokens.py
+│   │       │   ├───plugin_support.py
+│   │       │   ├───plugin.py
+│   │       │   ├───pth_file.py
+│   │       │   ├───...
+│   │       │   └───...
+│   │       ├───coverage-7.13.4.dist-info\
+│   │       ├───iniconfig\
+│   │       ├───iniconfig-2.3.0.dist-info\
+│   │       ├───packaging\
+│   │       ├───packaging-26.0.dist-info\
+│   │       ├───pip\
+│   │       ├───pip-26.0.1.dist-info\
+│   │       ├───pluggy\
+│   │       ├───pluggy-1.6.0.dist-info\
+│   │       ├───pygments\
+│   │       ├───pygments-2.19.2.dist-info\
+│   │       ├───pytest\
+│   │       ├───pytest_cov\
+│   │       ├───pytest_cov-7.0.0.dist-info\
+│   │       ├───pytest_mock\
+│   │       ├───pytest_mock-3.15.1.dist-info\
+│   │       └───pytest-9.0.2.dist-info\
+│   └───Scripts\
+│       ├───activate
+│       ├───activate.bat
+│       ├───activate.fish
+│       ├───Activate.ps1
+│       ├───coverage-3.13.exe
+│       ├───coverage.exe
+│       ├───coverage3.exe
+│       ├───deactivate.bat
+│       ├───pip.exe
+│       ├───pip3.13.exe
+│       ├───pip3.exe
+│       ├───py.test.exe
+│       ├───pygmentize.exe
+│       ├───pytest.exe
+│       ├───python.exe
+│       └───pythonw.exe
+├───docs\
+│   └───ai_sessions\
+│       ├───clean_masterclass1.md
+│       └───masterclass1.md
+├───hangman\
+│   ├───__init__.py
+│   ├───constants.py
+│   ├───__pycache__\...
+│   ├───controller\
+│   │   ├───__init__.py
+│   │   ├───game_controller.py
+│   │   └───__pycache__\...
+│   ├───data\
+│   │   ├───word_bank_long.json
+│   │   └───word_bank.json
+│   ├───model\
+│   │   ├───__init__.py
+│   │   ├───game.py
+│   │   ├───player.py
+│   │   └───__pycache__\...
+│   ├───services\
+│   │   ├───word_repository.py
+│   │   └───__pycache__\...
+│   └───view\
+│       ├───__init__.py
+│       ├───console_view.py
+│       ├───view_interface.py
+│       └───__pycache__\...
+└───tests\
+    ├───integration\
+    │   ├───test_run.py
+    │   └───__pycache__\...
+    └───unit\
+        ├───test_console_view.py
+        ├───test_game_controller.py
+        ├───test_game.py
+        ├───test_player.py
+        ├───test_view_interface.py
+        ├───test_word_repository.py
+        └───__pycache__\...
+
+
+</session_context>
+
+---
+
+## USER 🧑‍💻
+
+<session_context>
+This is the Gemini CLI. We are setting up the context for our chat.
+Today's date is Thursday, May 28, 2026 (formatted according to the user's locale).
+My operating system is: win32
+The project's temporary directory is: C:\Users\Carlos\.gemini\tmp\project-hangman
+- **Workspace Directories:**
+  - F:\Online courses\Self study\Python\Object oriented programming\Project Hangman\project_hangman
+  - f:\Online courses\Self study\Python\Object oriented programming\Project Hangman\project_hangman
+- **Directory Structure:**
+
+Showing up to 200 items (files + folders). Folders or files indicated with ... contain more items not shown, were ignored, or the display limit (200 items) was reached.
+
+F:\Online courses\Self study\Python\Object oriented programming\Project Hangman\project_hangman\
+├───.gitignore
+├───pytest.ini
+├───run.py
+├───__pycache__\...
+├───.git\...
+├───.pytest_cache\
+│   └───v\...
+├───.venv\...
+├───docs\
 │   └───ai_sessions\...
 ├───hangman\
 │   ├───__init__.py
@@ -1184,3 +1458,627 @@ Because of the **Contract** defined in `view_interface.py`, the developer writin
 *   **`ABC` / `@abstractmethod`:** A "Strict Contract" (fails during setup).
 
 **Next up: Polymorphism (The ability to swap these contract-fulfillers at will). Shall we move on?**
+
+---
+
+## USER 🧑‍💻
+
+Please continue with: Polymorphism: The ability of the Controller to call .display() on any View implementation (Console, GUI, or Mock) interchangeably.
+
+---
+
+## MODEL ✨
+
+**Tool Command**:
+```json
+{
+  "name": "update_topic",
+  "args": {
+    "summary": "I am explaining Polymorphism, the \"many forms\" principle. I will demonstrate how the `GameController` calls methods like `.display()` or `.prompt()` on a `view` object without caring if it's a `ConsoleView` or a `Mock` object in a test. This \"interface substitution\" is what allows the same controller logic to run in a real terminal or a headless test environment. I'll use examples from the `GameController` and its unit tests to illustrate this.",
+    "title": "Phase 1: Polymorphism",
+    "strategic_intent": "Explaining Polymorphism by showing how the Controller uses different View implementations interchangeably."
+  },
+  "id": "update_topic__update_topic_1780066988137_0"
+}
+```**Tool Command**:
+```json
+{
+  "name": "read_file",
+  "args": {
+    "start_line": 10,
+    "end_line": 100,
+    "file_path": "hangman/controller/game_controller.py"
+  },
+  "id": "read_file__read_file_1780066988274_1"
+}
+```**Tool Command**:
+```json
+{
+  "name": "read_file",
+  "args": {
+    "file_path": "tests/unit/test_game_controller.py",
+    "start_line": 10,
+    "end_line": 50
+  },
+  "id": "read_file__read_file_1780066988290_2"
+}
+```
+
+---
+
+## USER 🧑‍💻
+
+**Tool Response**:
+```json
+{
+  "id": "update_topic__update_topic_1780066988137_0",
+  "name": "update_topic",
+  "response": {
+    "output": "Current topic: \"Phase 1: Polymorphism\"\nTopic summary: I am explaining Polymorphism, the \"many forms\" principle. I will demonstrate how the `GameController` calls methods like `.display()` or `.prompt()` on a `view` object without caring if it's a `ConsoleView` or a `Mock` object in a test. This \"interface substitution\" is what allows the same controller logic to run in a real terminal or a headless test environment. I'll use examples from the `GameController` and its unit tests to illustrate this.\n\nStrategic Intent: Explaining Polymorphism by showing how the Controller uses different View implementations interchangeably."
+  }
+}
+```**Tool Response**:
+```json
+{
+  "id": "read_file__read_file_1780066988274_1",
+  "name": "read_file",
+  "response": {
+    "output": "\nIMPORTANT: The file content has been truncated.\nStatus: Showing lines 10-100 of 438 total lines.\nAction: To read more of the file, you can use the 'start_line' and 'end_line' parameters in a subsequent 'read_file' call. For example, to read the next section of the file, use start_line: 101.\n\n--- FILE CONTENT (truncated) ---\nclass GameController:\n    \"\"\"\n    Controller that orchestrates the interaction between the pure Game model\n    and the View. All I/O is performed via the View; the Game never handles input.\n    \"\"\"\n\n    def __init__(self, view: ConsoleView, constants_module):\n        self.view = view\n        self.c = constants_module\n        self.game = None\n        self.single_player = False\n\n        self.word_repo = WordRepository(BASE_DIR / \"data\" / \"word_bank.json\")\n    \n    # ==============================\n    # CONFIGURATION\n    # ==============================\n\n    def choose_normalization(self) -> bool:\n        while True:\n            response = self.view.prompt(\"Enable accent normalization (Y/N)? \").strip().upper()\n            if response in (\"Y\", \"N\"):\n                return response == \"Y\"\n            self.view.display(\"Invalid input. Please enter Y or N.\\n\")\n    \n    def choose_word_source(self) -> str:\n        while True:\n            choice = self.view.prompt(\n                \"Select word source: 1 = manual (moderator), 2 = automatic (by difficulty): \"\n            ).strip()\n            if choice in (\"1\", \"2\"):\n                return choice\n            self.view.display(\"Invalid input. Please enter 1 or 2.\\n\")\n    \n    def choose_difficulty(self) -> str:\n        while True:\n            diff = self.view.prompt(\n                \"Select difficulty: EASY, MEDIUM, HARD: \"\n            ).strip().upper()\n            if diff in (\"EASY\", \"MEDIUM\", \"HARD\"):\n                return diff\n            self.view.display(\"Invalid difficulty. Choose EASY, MEDIUM, or HARD.\\n\")\n    \n    def choose_reset_session(self) -> bool:\n        while True:\n            choice = self.view.prompt(\n                \"Reset word history for the new game? (Y/N): \"\n            ).strip().upper()\n            if choice in (\"Y\", \"N\"):\n                return choice == \"Y\"\n            self.view.display(\"Invalid input. Please choose Y or N.\\n\")\n    \n    def _is_exhaustion_error(self, error: ValueError) -> bool:\n        return \"No unused words remaining\" in str(error)\n    \n    # ==============================\n    # SETUP\n    # ==============================\n\n    def setup_game(self):\n        self.view.clear()\n        self.view.show_title()     \n        normalize = self.choose_normalization()\n        self.game = Game(constants_module=self.c, normalize_input=normalize)\n\n        # Word setup (manual or automatic)\n        source = self.choose_word_source()\n\n        if source == \"1\":\n            # Manual (current behavior)\n            while True:\n                raw_word = self.view.prompt_hidden(\"Please insert the word or phrase: \")\n                result = self.game.set_word(raw_word)\n                if result.get(\"ok\"):\n                    break\n                self.view.display(result.get(\"error\", \"Invalid word or phrase.\") + \"\\n\")\n\n        else:\n            # Automatic (by difficulty)\n            difficulty = self.choose_difficulty()\n\n            while True:\n                try:\n                    selected = self.word_repo.get_by_difficulty(difficulty)\n                except ValueError as e:\n                    self.view.display(str(e) + \"\\n\")\n                    difficulty = self.choose_difficulty()\n                    continue\n\n                result = self.game.set_word(selected)\n                if result.get(\"ok\"):"
+  }
+}
+```**Tool Response**:
+```json
+{
+  "id": "read_file__read_file_1780066988290_2",
+  "name": "read_file",
+  "response": {
+    "output": "\nIMPORTANT: The file content has been truncated.\nStatus: Showing lines 10-50 of 769 total lines.\nAction: To read more of the file, you can use the 'start_line' and 'end_line' parameters in a subsequent 'read_file' call. For example, to read the next section of the file, use start_line: 51.\n\n--- FILE CONTENT (truncated) ---\n\n@pytest.fixture\ndef view_factory():\n    def _factory():\n        view = Mock()\n\n        view.prompt.return_value = \"\"\n        view.prompt_hidden.return_value = \"\"\n        view.display.return_value = None\n        view.clear.return_value = None\n        view.pause.return_value = None\n        view.show_title.return_value = None\n        view.show_health.return_value = None\n        view.show_word.return_value = None\n        view.get_choice.return_value = \"1\"\n\n        return view\n    return _factory\n\n\n@pytest.fixture\ndef game_factory():\n    def _factory():\n        game = Mock()\n\n        game.set_word.return_value = {\"ok\": True}\n        game.create_players.return_value = {\"ok\": True}\n        game.reset_for_new_round.return_value = {\"ok\": True}\n\n        game.is_game_over.return_value = True\n        game.remaining_players = 1\n        game.n_players = 1\n        game.remaining_spaces = 1\n\n        player = Mock()\n        player.name = \"Alice\"\n        player.is_alive.return_value = True\n\n        game.get_player.return_value = player\n        game.get_visible_word.return_value = \"_ _ _\"\n        game.word_label.return_value = \"word\""
+  }
+}
+```
+
+---
+
+## MODEL ✨
+
+**Polymorphism** (from Greek, meaning "many forms") is the principle that different types of objects can be accessed through the same interface.
+
+In your project, the `GameController` is the best place to see this in action.
+
+### 1. The Controller's Perspective
+The `GameController` calls `self.view.prompt()` or `self.view.display()`. It **does not care** if that `view` object is printing to a terminal, showing a window, or doing nothing at all.
+
+```python
+# From game_controller.py
+def choose_normalization(self) -> bool:
+    while True:
+        # The controller just calls .prompt(). It doesn't know HOW the prompt happens.
+        response = self.view.prompt("Enable accent normalization (Y/N)? ")
+        ...
+```
+
+### 2. The "Many Forms"
+Because of the **Contract** (Abstraction) we studied earlier, we can provide different objects to the Controller:
+
+*   **Form A: `ConsoleView`** (Used in the real game)
+    *   Calls `input()` and `print()`.
+    *   Interaction: User types in the terminal.
+*   **Form B: `MockView`** (Used in `test_game_controller.py`)
+    *   Look at your test code: `view = Mock()`.
+    *   Interaction: No terminal appears. The test just tells the mock what to return (e.g., `view.prompt.return_value = "Y"`).
+*   **Form C: `GUIView`** (Hypothetical)
+    *   Could open a Pop-up window.
+    *   Interaction: User clicks a button.
+
+### Why this is a "Superpower" for Developers:
+If you had to change every single line of code in the Controller every time you changed the UI, the project would be impossible to maintain.
+
+With **Polymorphism**:
+1.  The `GameController` logic is written **once**.
+2.  It works with **any** View that follows the "View Contract."
+3.  You can test the Controller's logic (like "did the player win?") without ever actually seeing a screen, because you can swap the real View for a polymorphic "fake" (Mock) one.
+
+### Summary for your Study:
+*   **One Interface:** `View.display()`
+*   **Many Implementations:** `ConsoleView`, `WebView`, `MockView`.
+*   **Result:** The code is flexible and easy to test.
+
+---
+
+**Next up: Composition vs. Inheritance (Why the Controller "has a" View instead of "being" a View). Shall we proceed?**
+
+---
+
+## USER 🧑‍💻
+
+Continue with: Composition vs. Inheritance: Understanding why GameController has a Game and has a View (Composition) rather than inheriting from them, leading to more flexible code.
+
+---
+
+## MODEL ✨
+
+**Tool Command**:
+```json
+{
+  "name": "update_topic",
+  "args": {
+    "title": "Phase 1: Composition vs. Inheritance",
+    "summary": "I am explaining the \"Composition vs. Inheritance\" design choice. I'll define the \"is-a\" (Inheritance) vs. \"has-a\" (Composition) relationships. Using the `GameController` as a primary example, I'll show how it \"has a\" `Game` and \"has a\" `View`. I will explain how this prevents a \"God Object\" and allows for independent evolution of the model and view components, making the overall system more maintainable and testable.",
+    "strategic_intent": "Explaining the difference between Composition and Inheritance using the GameController's structure."
+  },
+  "id": "update_topic__update_topic_1780067358271_0"
+}
+```**Tool Command**:
+```json
+{
+  "name": "read_file",
+  "args": {
+    "file_path": "hangman/controller/game_controller.py",
+    "end_line": 25,
+    "start_line": 1
+  },
+  "id": "read_file__read_file_1780067358283_1"
+}
+```
+
+---
+
+## USER 🧑‍💻
+
+**Tool Response**:
+```json
+{
+  "id": "update_topic__update_topic_1780067358271_0",
+  "name": "update_topic",
+  "response": {
+    "output": "Current topic: \"Phase 1: Composition vs. Inheritance\"\nTopic summary: I am explaining the \"Composition vs. Inheritance\" design choice. I'll define the \"is-a\" (Inheritance) vs. \"has-a\" (Composition) relationships. Using the `GameController` as a primary example, I'll show how it \"has a\" `Game` and \"has a\" `View`. I will explain how this prevents a \"God Object\" and allows for independent evolution of the model and view components, making the overall system more maintainable and testable.\n\nStrategic Intent: Explaining the difference between Composition and Inheritance using the GameController's structure."
+  }
+}
+```**Tool Response**:
+```json
+{
+  "id": "read_file__read_file_1780067358283_1",
+  "name": "read_file",
+  "response": {
+    "output": "\nIMPORTANT: The file content has been truncated.\nStatus: Showing lines 1-25 of 438 total lines.\nAction: To read more of the file, you can use the 'start_line' and 'end_line' parameters in a subsequent 'read_file' call. For example, to read the next section of the file, use start_line: 26.\n\n--- FILE CONTENT (truncated) ---\nfrom hangman.model.game import Game\nfrom hangman.view.console_view import ConsoleView\nfrom hangman.services.word_repository import WordRepository\n\nfrom pathlib import Path\n\nBASE_DIR = Path(__file__).resolve().parent.parent\n\n\nclass GameController:\n    \"\"\"\n    Controller that orchestrates the interaction between the pure Game model\n    and the View. All I/O is performed via the View; the Game never handles input.\n    \"\"\"\n\n    def __init__(self, view: ConsoleView, constants_module):\n        self.view = view\n        self.c = constants_module\n        self.game = None\n        self.single_player = False\n\n        self.word_repo = WordRepository(BASE_DIR / \"data\" / \"word_bank.json\")\n    \n    # ==============================\n    # CONFIGURATION"
+  }
+}
+```
+
+---
+
+## MODEL ✨
+
+This is one of the most important decisions in software architecture. It’s the difference between a "Rigid" system and a "Flexible" one.
+
+### 1. Inheritance: The "Is-A" Relationship
+Inheritance implies that a child class is a specialized version of a parent class.
+*   *Example:* A `ConsoleView` **is a** `View`. This makes sense because it shares the fundamental identity of a View.
+
+**What would happen if we used inheritance for the Controller?**
+If `GameController` inherited from `Game`, it would look like this:
+`class GameController(Game): ...`
+This would mean the Controller **is a** Game. It would have all the health points and secret words inside it. This is generally considered **bad practice** because it mixes two unrelated identities (The "Rules" and the "Orchestration").
+
+---
+
+### 2. Composition: The "Has-A" Relationship
+Composition means building complex objects by combining simpler ones. This is what your project uses.
+
+In `game_controller.py`:
+```python
+class GameController:
+    def __init__(self, view: View, ...):
+        self.view = view    # The Controller HAS A View
+        self.game = None    # The Controller HAS A Game
+```
+
+*   **Real-world Mapping:** A Car **has an** engine; it **is not** an engine. You can swap the engine without changing the car's identity.
+
+---
+
+### Why Composition is better for the Controller:
+
+1.  **Pluggability (The "Lego" Effect):** 
+    Because the Controller "has a" View, you can plug in any View you want (Console, Mock, GUI) at runtime. If the Controller *inherited* from `ConsoleView`, it would be stuck as a Console app forever.
+
+2.  **Single Responsibility:** 
+    The `Game` object only cares about "Is this letter in the word?" 
+    The `View` object only cares about "How do I print an underscore?" 
+    The `Controller` stays clean because it doesn't have to know *how* those things work; it just asks its components to do their jobs.
+
+3.  **Testing Flexibility:** 
+    As we saw in the Polymorphism section, composition allows you to pass a "Fake Game" or a "Fake View" into the Controller during a test. If they were all one giant inherited class, you couldn't separate them to test them.
+
+4.  **Avoiding the "God Object":** 
+    Inheritance often leads to "God Objects"—classes that do everything and are impossible to debug. Composition forces you to keep things small and focused.
+
+### Summary for your Study:
+*   **Inheritance:** Use when one thing **is** another thing (e.g., `Eagle` is a `Bird`).
+*   **Composition:** Use when one thing **uses** or **manages** another thing (e.g., `Zoo` has a `Bird`).
+
+**You have completed Phase 1: OOP Foundations!** 
+
+**Would you like to review or ask questions, or are you ready to start Phase 2: SOLID Design Principles?**
+
+---
+
+## USER 🧑‍💻
+
+Yes. What are SOLID Design Principles?
+
+---
+
+## MODEL ✨
+
+**Tool Command**:
+```json
+{
+  "name": "update_topic",
+  "args": {
+    "summary": "I am starting Phase 2: SOLID Design Principles. I'll begin by explaining the acronym SOLID and its role in creating maintainable code. Then, I will focus on the first principle, the Single Responsibility Principle (SRP). I'll use the `WordRepository` and `Game` classes as examples to show how isolating responsibilities (data management vs. game logic) prevents code fragility and makes the system easier to extend.",
+    "title": "Phase 2: SOLID Design Principles - Intro & SRP",
+    "strategic_intent": "Introducing SOLID principles and explaining the Single Responsibility Principle (SRP)."
+  },
+  "id": "update_topic__update_topic_1780068774443_0"
+}
+```**Tool Command**:
+```json
+{
+  "name": "read_file",
+  "args": {
+    "start_line": 1,
+    "file_path": "hangman/services/word_repository.py",
+    "end_line": 50
+  },
+  "id": "read_file__read_file_1780068774574_1"
+}
+```**Tool Command**:
+```json
+{
+  "name": "read_file",
+  "args": {
+    "start_line": 1,
+    "file_path": "hangman/model/game.py",
+    "end_line": 50
+  },
+  "id": "read_file__read_file_1780068774589_2"
+}
+```
+
+---
+
+## USER 🧑‍💻
+
+**Tool Response**:
+```json
+{
+  "id": "update_topic__update_topic_1780068774443_0",
+  "name": "update_topic",
+  "response": {
+    "output": "Current topic: \"Phase 2: SOLID Design Principles - Intro & SRP\"\nTopic summary: I am starting Phase 2: SOLID Design Principles. I'll begin by explaining the acronym SOLID and its role in creating maintainable code. Then, I will focus on the first principle, the Single Responsibility Principle (SRP). I'll use the `WordRepository` and `Game` classes as examples to show how isolating responsibilities (data management vs. game logic) prevents code fragility and makes the system easier to extend.\n\nStrategic Intent: Introducing SOLID principles and explaining the Single Responsibility Principle (SRP)."
+  }
+}
+```**Tool Response**:
+```json
+{
+  "id": "read_file__read_file_1780068774574_1",
+  "name": "read_file",
+  "response": {
+    "output": "\nIMPORTANT: The file content has been truncated.\nStatus: Showing lines 1-50 of 172 total lines.\nAction: To read more of the file, you can use the 'start_line' and 'end_line' parameters in a subsequent 'read_file' call. For example, to read the next section of the file, use start_line: 51.\n\n--- FILE CONTENT (truncated) ---\nfrom __future__ import annotations\n\nimport json\nimport random\nimport unicodedata\nfrom pathlib import Path\nfrom typing import Dict, List, Set, Union\n\n\nclass WordRepository:\n    \"\"\"\n    Loads, validates, normalizes, and serves words/phrases.\n\n    Guarantees:\n    - All stored words satisfy Game.set_word() constraints\n    - All internal storage is normalized\n    - No-repeat enforced at session level\n    \"\"\"\n\n    # Allowed difficulty keys expected by the controller\n    EXPECTED_DIFFICULTIES = {\"EASY\", \"MEDIUM\", \"HARD\"}\n\n    def __init__(self, file_path: Union[str, Path]):\n        self.file_path = Path(file_path).resolve()\n        # Normalized words by difficulty\n        self.normalized_words_by_diff: Dict[str, Set[str]] = {diff: set() for diff in self.EXPECTED_DIFFICULTIES}\n        # used_words stores normalized forms (canonical) for dedup & no-repeat\n        self.used_words: Set[str] = set()\n\n        self._load()\n\n    # -------------------------\n    # Loading and validation\n    # -------------------------\n    def _load(self) -> None:\n        \"\"\"\n        Load, validate, and normalizes the JSON file.\n        Accept two formats:\n            1) dict with keys (easy/medium/hard) mapping to lists of strings\n            2) list of strings -> treat as MEDIUM default bucket\n        All invalid entries are skipped (silently). Optionally, log rejected counts.\n        \"\"\"\n\n        if not self.file_path.exists():\n            raise FileNotFoundError(f\"Word bank file not found: {self.file_path}\")\n\n        try:\n            with self.file_path.open(\"r\", encoding=\"utf-8\") as fh:\n                data = json.load(fh)\n        except json.JSONDecodeError as exc:"
+  }
+}
+```**Tool Response**:
+```json
+{
+  "id": "read_file__read_file_1780068774589_2",
+  "name": "read_file",
+  "response": {
+    "output": "\nIMPORTANT: The file content has been truncated.\nStatus: Showing lines 1-50 of 265 total lines.\nAction: To read more of the file, you can use the 'start_line' and 'end_line' parameters in a subsequent 'read_file' call. For example, to read the next section of the file, use start_line: 51.\n\n--- FILE CONTENT (truncated) ---\nimport string\nimport unicodedata\nfrom typing import List, Dict, Any, Optional\n\nfrom .player import Player\n\n\nclass Game:\n    \"\"\"Pure game model: contains all rules and state but performs no I/O.\"\"\"\n\n    def __init__(self, constants_module, normalize_input: bool = True):\n        self.c = constants_module\n        self.normalize_input = normalize_input\n\n        self.players: List[Player] = []\n        self.word: str = \"\"\n        self.unknown_word: List[str] = []\n        self.remaining_letters: set[str] = set()\n        self.remaining_players: int = 0\n        self.n_players: int = 0\n        self.remaining_spaces: int = 0\n        self.is_phrase: bool = False\n\n        if self.normalize_input:\n            base_letters = string.ascii_uppercase\n        else:\n            base_letters = string.ascii_uppercase + \"ÑÁÉÍÓÚÜÇ\"\n        self.remaining_letters = set(base_letters)\n\n    # ---------------------------\n    # Normalization\n    # ---------------------------\n\n    def _normalize(self, text: str) -> str:\n        text = text or \"\"\n        if not self.normalize_input:\n            return text.upper()\n        normalized = unicodedata.normalize(\"NFD\", text)\n        filtered = \"\".join(ch for ch in normalized if unicodedata.category(ch) != \"Mn\")\n        return filtered.upper()\n\n    # ---------------------------\n    # Word setup\n    # ---------------------------\n\n    def set_word(self, raw_word: str) -> Dict[str, Any]:\n        if raw_word is None:\n            return {\"ok\": False, \"error\": \"No word provided.\"}\n\n        word = raw_word.strip()"
+  }
+}
+```
+
+---
+
+## MODEL ✨
+
+**SOLID** is an acronym representing five design principles that make software more understandable, flexible, and maintainable. They were popularized by Robert C. Martin ("Uncle Bob").
+
+*   **S** - Single Responsibility Principle
+*   **O** - Open/Closed Principle
+*   **L** - Liskov Substitution Principle
+*   **I** - Interface Segregation Principle
+*   **D** - Dependency Inversion Principle
+
+Let's dive into the first one:
+
+---
+
+### S: Single Responsibility Principle (SRP)
+> *"A class should have one, and only one, reason to change."*
+
+This means a class should focus on doing **one thing well**. If a class does too much, changing one part of it might accidentally break another unrelated part.
+
+#### Concrete Example 1: `WordRepository` vs. `Game`
+In your project, these are two distinct classes with very different responsibilities.
+
+*   **`WordRepository` Responsibility:** Managing the **Data**. It knows how to read JSON files, how to filter by difficulty, and how to keep track of used words so they don't repeat.
+    *   *Reason to change:* You decide to use a CSV file instead of JSON.
+*   **`Game` Responsibility:** Managing the **Rules**. It knows how health points work, how to check a guess, and when the game is over.
+    *   *Reason to change:* You want to change the number of lives a player starts with.
+
+**What if they were combined?**
+If you put the JSON loading code inside the `Game` class, the `Game` class would become "fragile." A mistake in your file-reading logic could break the entire game engine, even if the "rules" of Hangman haven't changed.
+
+#### Concrete Example 2: `ConsoleView`
+*   **Responsibility:** **I/O (Input/Output)**. It only cares about `print()` and `input()`.
+*   It does **not** know if the guess is correct. It just sends the text to the Controller and displays whatever the Controller tells it to.
+
+---
+
+### Why SRP is a "Superpower":
+1.  **Easier Debugging:** If there's an error loading words, you know exactly which file to look at (`word_repository.py`). You don't have to sift through 500 lines of game logic.
+2.  **Reusable Code:** You could take the `WordRepository` and use it in a *different* word game (like Wordle) without bringing the Hangman rules with it.
+3.  **Merge Safety:** In a team, one person can work on the UI (`View`) while another works on the logic (`Game`) without stepping on each other's toes.
+
+### Summary for your Study:
+When writing or reviewing code, ask yourself: *"Does this class have more than one job?"* If it's managing a database **and** calculating player scores, it's violating SRP.
+
+---
+
+**Next up: O - Open/Closed Principle (Extension without Modification). Ready to proceed?**
+
+---
+
+## USER 🧑‍💻
+
+Yes
+
+---
+
+## MODEL ✨
+
+**Tool Command**:
+```json
+{
+  "name": "update_topic",
+  "args": {
+    "title": "Phase 2: SOLID - Open/Closed Principle (OCP)",
+    "strategic_intent": "Explaining the Open/Closed Principle (OCP) using the View interface as a prime example of extension without modification.",
+    "summary": "I am moving to the second SOLID principle: the Open/Closed Principle (OCP). I will explain how the `View` interface allows the system to be 'open for extension' (adding new types of views like GUI or Web) while remaining 'closed for modification' (the `GameController` code never needs to change to support these new views). I'll provide a 'Bad Code' vs. 'Good Code' comparison to make the benefit of this principle concrete."
+  },
+  "id": "update_topic__update_topic_1780069020769_0"
+}
+```**Tool Command**:
+```json
+{
+  "name": "read_file",
+  "args": {
+    "end_line": 20,
+    "file_path": "hangman/controller/game_controller.py",
+    "start_line": 10
+  },
+  "id": "read_file__read_file_1780069020780_1"
+}
+```
+
+---
+
+## USER 🧑‍💻
+
+**Tool Response**:
+```json
+{
+  "id": "update_topic__update_topic_1780069020769_0",
+  "name": "update_topic",
+  "response": {
+    "output": "Current topic: \"Phase 2: SOLID - Open/Closed Principle (OCP)\"\nTopic summary: I am moving to the second SOLID principle: the Open/Closed Principle (OCP). I will explain how the `View` interface allows the system to be 'open for extension' (adding new types of views like GUI or Web) while remaining 'closed for modification' (the `GameController` code never needs to change to support these new views). I'll provide a 'Bad Code' vs. 'Good Code' comparison to make the benefit of this principle concrete.\n\nStrategic Intent: Explaining the Open/Closed Principle (OCP) using the View interface as a prime example of extension without modification."
+  }
+}
+```**Tool Response**:
+```json
+{
+  "id": "read_file__read_file_1780069020780_1",
+  "name": "read_file",
+  "response": {
+    "output": "\nIMPORTANT: The file content has been truncated.\nStatus: Showing lines 10-20 of 438 total lines.\nAction: To read more of the file, you can use the 'start_line' and 'end_line' parameters in a subsequent 'read_file' call. For example, to read the next section of the file, use start_line: 21.\n\n--- FILE CONTENT (truncated) ---\nclass GameController:\n    \"\"\"\n    Controller that orchestrates the interaction between the pure Game model\n    and the View. All I/O is performed via the View; the Game never handles input.\n    \"\"\"\n\n    def __init__(self, view: ConsoleView, constants_module):\n        self.view = view\n        self.c = constants_module\n        self.game = None\n        self.single_player = False"
+  }
+}
+```
+
+---
+
+## MODEL ✨
+
+### O: Open/Closed Principle (OCP)
+> *"Software entities should be open for extension, but closed for modification."*
+
+This means you should be able to add new functionality to your app **without** changing the existing, working code.
+
+---
+
+### The "Bad" Way (Violating OCP)
+Imagine if your `GameController` didn't use an interface. It might look like this:
+
+```python
+class GameController:
+    def __init__(self, mode: str):
+        self.mode = mode # "console" or "gui"
+
+    def display_message(self, msg):
+        if self.mode == "console":
+            print(msg)
+        elif self.mode == "gui":
+            # imagine 10 lines of complex GUI code here
+            pass
+```
+
+**Why this is bad:** Every time you want to add a new view (like a `WebView` or a `MobileView`), you have to **modify** the `GameController` and add another `elif` block. This is "Closed for Extension" and "Open for Modification"—the exact opposite of what we want.
+
+---
+
+### The "SOLID" Way (Your Project)
+In your project, the `GameController` is **Closed for Modification**. Look at its code:
+
+```python
+def choose_normalization(self) -> bool:
+    ...
+    self.view.display("Invalid input...")
+```
+
+The Controller just calls `self.view.display()`. It doesn't have any `if/else` logic about *what* the view is.
+
+**How it is "Open for Extension":**
+If you want to add a GUI version of Hangman tomorrow:
+1.  **EXTEND:** You create a new class `GUIView(View)`.
+2.  **PLUG IN:** You pass that new object into the Controller's constructor.
+3.  **RESULT:** You have a brand new GUI game **without changing a single line** of the `GameController` or the `Game` model.
+
+---
+
+### Why OCP is a "Superpower":
+1.  **Risk Reduction:** Since you aren't touching the existing `GameController` code, you can't accidentally break the game's core logic while adding a new feature.
+2.  **Cleaner Code:** You avoid giant, messy `if/else` or `switch` statements that grow every time the project expands.
+3.  **Independence:** Different developers can write new views without ever needing to see or understand the internal complexity of the Controller.
+
+### Summary for your Study:
+OCP is achieved through **Abstraction** (Interfaces) and **Polymorphism**. It transforms your code from a "Rigid Statue" that must be chiseled to change, into a "Modular Computer" where you can just swap out the parts.
+
+---
+
+**Next up: L - Liskov Substitution Principle (Ensuring subclasses don't break the parent's promise). Shall we continue?**
+
+---
+
+## USER 🧑‍💻
+
+Yes
+
+---
+
+## MODEL ✨
+
+**Tool Command**:
+```json
+{
+  "name": "update_topic",
+  "args": {
+    "title": "Phase 2: SOLID - Liskov Substitution Principle (LSP)",
+    "strategic_intent": "Explaining the Liskov Substitution Principle (LSP) using the View hierarchy and substitution in tests.",
+    "summary": "I am moving to the third SOLID principle: the Liskov Substitution Principle (LSP). I'll explain that a subclass should be able to stand in for its parent without the system knowing the difference or breaking. I will use the relationship between `View` and `ConsoleView` to demonstrate this, showing how the `GameController` (and the unit tests using `Mock`) successfully treat them as interchangeable because they strictly follow the method signatures and behaviors defined in the base class."
+  },
+  "id": "update_topic__update_topic_1780069413895_0"
+}
+```**Tool Command**:
+```json
+{
+  "name": "read_file",
+  "args": {
+    "file_path": "hangman/view/view_interface.py",
+    "start_line": 5,
+    "end_line": 15
+  },
+  "id": "read_file__read_file_1780069414036_1"
+}
+```**Tool Command**:
+```json
+{
+  "name": "read_file",
+  "args": {
+    "file_path": "hangman/view/console_view.py",
+    "end_line": 25,
+    "start_line": 15
+  },
+  "id": "read_file__read_file_1780069414051_2"
+}
+```
+
+---
+
+## USER 🧑‍💻
+
+**Tool Response**:
+```json
+{
+  "id": "update_topic__update_topic_1780069413895_0",
+  "name": "update_topic",
+  "response": {
+    "output": "Current topic: \"Phase 2: SOLID - Liskov Substitution Principle (LSP)\"\nTopic summary: I am moving to the third SOLID principle: the Liskov Substitution Principle (LSP). I'll explain that a subclass should be able to stand in for its parent without the system knowing the difference or breaking. I will use the relationship between `View` and `ConsoleView` to demonstrate this, showing how the `GameController` (and the unit tests using `Mock`) successfully treat them as interchangeable because they strictly follow the method signatures and behaviors defined in the base class.\n\nStrategic Intent: Explaining the Liskov Substitution Principle (LSP) using the View hierarchy and substitution in tests."
+  }
+}
+```**Tool Response**:
+```json
+{
+  "id": "read_file__read_file_1780069414036_1",
+  "name": "read_file",
+  "response": {
+    "output": "\nIMPORTANT: The file content has been truncated.\nStatus: Showing lines 5-15 of 29 total lines.\nAction: To read more of the file, you can use the 'start_line' and 'end_line' parameters in a subsequent 'read_file' call. For example, to read the next section of the file, use start_line: 16.\n\n--- FILE CONTENT (truncated) ---\n    \"\"\"Abstract interface for user interaction.\"\"\"\n\n    def display(self, message: str) -> None:\n        raise NotImplementedError\n\n    def show_title(self) -> None:\n        raise NotImplementedError\n    \n    def prompt(self, message: str) -> str:\n        raise NotImplementedError\n"
+  }
+}
+```**Tool Response**:
+```json
+{
+  "id": "read_file__read_file_1780069414051_2",
+  "name": "read_file",
+  "response": {
+    "output": "\nIMPORTANT: The file content has been truncated.\nStatus: Showing lines 15-25 of 54 total lines.\nAction: To read more of the file, you can use the 'start_line' and 'end_line' parameters in a subsequent 'read_file' call. For example, to read the next section of the file, use start_line: 26.\n\n--- FILE CONTENT (truncated) ---\n        if self.use_clear:\n            os.system('cls' if os.name == 'nt' else 'clear')\n\n    def display(self, message: str) -> None:\n        print(message)\n\n    def show_title(self) -> None:\n        self.clear()\n        self.display(\"    *** HANGMAN ***\\n\\n\")\n    \n    def prompt(self, message: str) -> str:"
+  }
+}
+```
+
+---
+
+## MODEL ✨
+
+### L: Liskov Substitution Principle (LSP)
+> *"Objects of a superclass should be replaceable with objects of its subclasses without breaking the application."*
+
+This sounds like Polymorphism, but it goes deeper. It’s not just about having the same *names* for methods; it’s about ensuring the **behavior** of the subclass doesn't surprise the code that uses it.
+
+---
+
+### The "Contract" Guarantee
+Think of the `View` class as a set of promises. 
+*   **The Promise:** If you call `prompt()`, I will return a `string`.
+
+In your project, the `GameController` relies on this promise:
+
+```python
+# GameController expects a string back from the View
+response = self.view.prompt("Enable accent normalization (Y/N)? ").strip().upper()
+```
+
+If you created a `BadView` subclass where `prompt()` returned an `Integer` or `None`, the code `response.strip()` would **crash** because you can't strip an integer. Even though `BadView` has a method named `prompt`, it violated the **Substitution Principle**. It wasn't a "true" substitute.
+
+---
+
+### LSP in Action: The `ConsoleView`
+Your `ConsoleView` is a "Good Citizen" because:
+1.  **Same Signatures:** It accepts exactly the same parameters as the base `View`.
+2.  **Same Return Types:** It returns a `str` from `prompt()`, just as the base class implies.
+3.  **Expected Behavior:** It doesn't throw weird, unexpected errors that the Controller doesn't know how to handle.
+
+### LSP in Action: The `MockView` (Testing)
+In your unit tests, you use a `Mock` object to substitute the `View`. 
+
+```python
+# From tests/unit/test_game_controller.py
+view.prompt.return_value = "Y"
+```
+
+The `Mock` is configured to return a string. Because it behaves exactly like the "Contract" promised, the `GameController` works perfectly with it. This is LSP at its best: the Controller doesn't even know it's talking to a "fake" view.
+
+---
+
+### Why LSP is a "Superpower":
+1.  **Trust:** You can write logic in the Controller knowing that any `View` implementation will follow the rules.
+2.  **Safety:** It prevents "Heisenbugs" (bugs that appear only when you switch implementations) by forcing subclasses to be consistent.
+3.  **Maintainability:** If you follow LSP, you never have to write code like `if isinstance(view, ConsoleView): ...`. You just treat it like a `View` and it works.
+
+### Summary for your Study:
+LSP says: *"Don't just share the name; share the spirit of the contract."* Subclasses should never do less than their parents, and they should never behave in a way that would break a parent's user.
+
+---
+
+**Next up: I - Interface Segregation Principle (Keeping things lean). Ready?**
