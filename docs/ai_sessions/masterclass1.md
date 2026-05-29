@@ -953,3 +953,234 @@ By making it `_normalize`, you are saying: *"This is a helper tool for the Game'
 ---
 
 **Next topic: Abstraction (Creating the View "Contract"). Shall we proceed?**
+
+---
+
+## USER 🧑‍💻
+
+Yes
+
+---
+
+## MODEL ✨
+
+**Tool Command**:
+```json
+{
+  "name": "update_topic",
+  "args": {
+    "summary": "I am transitioning to the next topic in Phase 1: Abstraction. I will use the `View` class in `hangman/view/view_interface.py` to illustrate how we define a \"contract\" using abstract methods (implemented via `NotImplementedError` in this project). I will explain how the `GameController` depends on this abstraction rather than a specific implementation, allowing for flexibility and cleaner testing.",
+    "strategic_intent": "Explaining Abstraction using the View interface and how it defines a contract between layers.",
+    "title": "Phase 1: Abstraction"
+  },
+  "id": "update_topic__update_topic_1780013073973_0"
+}
+```**Tool Command**:
+```json
+{
+  "name": "read_file",
+  "args": {
+    "file_path": "hangman/view/view_interface.py"
+  },
+  "id": "read_file__read_file_1780013074142_1"
+}
+```**Tool Command**:
+```json
+{
+  "name": "read_file",
+  "args": {
+    "file_path": "hangman/view/console_view.py"
+  },
+  "id": "read_file__read_file_1780013074146_2"
+}
+```
+
+---
+
+## USER 🧑‍💻
+
+**Tool Response**:
+```json
+{
+  "id": "update_topic__update_topic_1780013073973_0",
+  "name": "update_topic",
+  "response": {
+    "output": "Current topic: \"Phase 1: Abstraction\"\nTopic summary: I am transitioning to the next topic in Phase 1: Abstraction. I will use the `View` class in `hangman/view/view_interface.py` to illustrate how we define a \"contract\" using abstract methods (implemented via `NotImplementedError` in this project). I will explain how the `GameController` depends on this abstraction rather than a specific implementation, allowing for flexibility and cleaner testing.\n\nStrategic Intent: Explaining Abstraction using the View interface and how it defines a contract between layers."
+  }
+}
+```**Tool Response**:
+```json
+{
+  "id": "read_file__read_file_1780013074142_1",
+  "name": "read_file",
+  "response": {
+    "output": "from typing import List\n\n\nclass View:\n    \"\"\"Abstract interface for user interaction.\"\"\"\n\n    def display(self, message: str) -> None:\n        raise NotImplementedError\n\n    def show_title(self) -> None:\n        raise NotImplementedError\n    \n    def prompt(self, message: str) -> str:\n        raise NotImplementedError\n\n    def prompt_hidden(self, message: str) -> str:\n        raise NotImplementedError\n\n    def pause(self, message: str = \"Press Enter to continue...\") -> None:\n        raise NotImplementedError\n\n    def clear(self) -> None:\n        raise NotImplementedError\n\n    def show_word(self, word_state: List[str]) -> None:\n        raise NotImplementedError\n\n    def show_health(self, player) -> None:\n        raise NotImplementedError"
+  }
+}
+```**Tool Response**:
+```json
+{
+  "id": "read_file__read_file_1780013074146_2",
+  "name": "read_file",
+  "response": {
+    "output": "import os\nimport getpass\nfrom typing import List\n\nfrom .view_interface import View\n\n\nclass ConsoleView(View):\n    \"\"\"Handles all console-based input and output operations.\"\"\"\n\n    def __init__(self, use_clear: bool = True):\n        self.use_clear = use_clear\n\n    def clear(self) -> None:\n        if self.use_clear:\n            os.system('cls' if os.name == 'nt' else 'clear')\n\n    def display(self, message: str) -> None:\n        print(message)\n\n    def show_title(self) -> None:\n        self.clear()\n        self.display(\"    *** HANGMAN ***\\n\\n\")\n    \n    def prompt(self, message: str) -> str:\n        try:\n            return input(message)\n        except (KeyboardInterrupt, EOFError):\n            self.clear()\n            print(\"\\nGame interrupted. Exiting safely.\\n\")\n            exit(0)\n\n    def prompt_hidden(self, message: str) -> str:\n        try:\n            return getpass.getpass(prompt=message)\n        except (KeyboardInterrupt, EOFError):\n            self.clear()\n            print(\"\\nGame interrupted. Exiting safely.\\n\")\n            exit(0)\n\n    def pause(self, message: str = \"Press Enter to continue...\") -> None:\n        try:\n            input(message)\n        except (KeyboardInterrupt, EOFError):\n            self.clear()\n            print(\"\\nGame interrupted. Exiting safely.\\n\")\n            exit(0)\n\n    def show_word(self, word_state: List[str]) -> None:\n        print(f\"    {' '.join(word_state)}\\n\")\n\n    def show_health(self, player) -> None:\n        print(player.hangman_states[player.health])\n        print()"
+  }
+}
+```
+
+---
+
+## MODEL ✨
+
+**Abstraction** is about focusing on *what* an object does rather than *how* it does it. It allows you to create a "contract" that other parts of the system can rely on.
+
+### 1. The Interface: The "What"
+Look at `view_interface.py`. This class (`View`) doesn't actually *do* anything. Every method just raises a `NotImplementedError`.
+
+```python
+class View:
+    def display(self, message: str) -> None:
+        raise NotImplementedError
+```
+
+This is the **Abstraction**. It tells the `GameController`: *"I don't know if you're using a terminal or a website, but I promise that whatever 'View' you get will have a method called `display`."*
+
+### 2. The Implementation: The "How"
+Now look at `console_view.py`. It **inherits** from `View` and fills in the details.
+
+```python
+class ConsoleView(View):
+    def display(self, message: str) -> None:
+        print(message)  # The specific implementation for the terminal
+```
+
+### Why this is powerful for you:
+1.  **Decoupling:** The `GameController` is "blind" to the details. It just calls `view.display()`. If you wanted to make this a Desktop App with buttons tomorrow, you would just create a `GUIView` class and swap it in. You wouldn't have to change a single line of logic in the Controller.
+2.  **Testing:** During your unit tests, you don't want to actually print things to the screen or wait for a user to type. Because of this abstraction, you can create a "Mock View" (a fake implementation) that just records what happened, making tests fast and automated.
+3.  **Logical Focus:** It keeps the "Business Logic" (Rules of Hangman) separate from the "Presentation Logic" (Colors, Buttons, Text).
+
+### Key Takeaway:
+Abstraction creates a **Boundary**. On one side is the *intent* (display a message), and on the other side is the *execution* (calling the `print()` function).
+
+---
+
+**Next topic: Polymorphism (Swapping implementations). Ready to see how the Controller uses this?**
+
+---
+
+## USER 🧑‍💻
+
+Please continue with:
+
+Using Abstract Base Classes (ABCs) or `NotImplementedError` to define "contracts."
+
+---
+
+## MODEL ✨
+
+**Tool Command**:
+```json
+{
+  "name": "update_topic",
+  "args": {
+    "title": "Phase 1: Defining Contracts (ABCs vs. NotImplementedError)",
+    "summary": "I am continuing the deep dive into Abstraction. I will explain the two main ways to define 'contracts' in Python: using `NotImplementedError` (as seen in `View`) and using the `abc` module (Abstract Base Classes). I'll clarify how these mechanisms prevent the instantiation of incomplete classes and ensure that subclasses provide specific behaviors required by the orchestrating logic, like the `GameController`.",
+    "strategic_intent": "Explaining how 'contracts' are defined in Python using NotImplementedError and ABCs."
+  },
+  "id": "update_topic__update_topic_1780013202527_0"
+}
+```**Tool Command**:
+```json
+{
+  "name": "grep_search",
+  "args": {
+    "pattern": "from abc import"
+  },
+  "id": "grep_search__grep_search_1780013202541_1"
+}
+```
+
+---
+
+## USER 🧑‍💻
+
+**Tool Response**:
+```json
+{
+  "id": "update_topic__update_topic_1780013202527_0",
+  "name": "update_topic",
+  "response": {
+    "output": "Current topic: \"Phase 1: Defining Contracts (ABCs vs. NotImplementedError)\"\nTopic summary: I am continuing the deep dive into Abstraction. I will explain the two main ways to define 'contracts' in Python: using `NotImplementedError` (as seen in `View`) and using the `abc` module (Abstract Base Classes). I'll clarify how these mechanisms prevent the instantiation of incomplete classes and ensure that subclasses provide specific behaviors required by the orchestrating logic, like the `GameController`.\n\nStrategic Intent: Explaining how 'contracts' are defined in Python using NotImplementedError and ABCs."
+  }
+}
+```**Tool Response**:
+```json
+{
+  "id": "grep_search__grep_search_1780013202541_1",
+  "name": "grep_search",
+  "response": {
+    "output": "No matches found for pattern \"from abc import\" across 2 workspace directories."
+  }
+}
+```
+
+---
+
+## MODEL ✨
+
+In Python, a **Contract** is a formal agreement that says: *"Any class that wants to be a 'View' MUST implement these specific methods, or the program will fail."*
+
+There are two primary ways to enforce this:
+
+### 1. The Manual Way: `NotImplementedError` (Current Project)
+This is what you see in `view_interface.py`. 
+
+```python
+class View:
+    def display(self, message: str) -> None:
+        raise NotImplementedError("Subclasses must implement display()")
+```
+
+*   **How it works:** It allows you to create the `View` class, but if you (or another developer) try to use it without overriding `display`, the code will crash with a specific error message.
+*   **Pros:** Very simple, no imports required, works in all versions of Python.
+*   **Cons:** You only find out the method is missing when you try to **run** that specific line of code.
+
+### 2. The Professional Way: Abstract Base Classes (ABCs)
+While not used in your current project, this is the industry standard for large applications. It uses Python's built-in `abc` module.
+
+```python
+from abc import ABC, abstractmethod
+
+class View(ABC):  # Inherits from ABC
+    @abstractmethod
+    def display(self, message: str) -> None:
+        pass
+```
+
+*   **How it works:** If you try to create an object from a subclass that forgot to implement `display`, Python will throw an error **immediately** when you try to instantiate the object: `TypeError: Can't instantiate abstract class ConsoleView with abstract method display`.
+*   **The Contract:** This is a "Strict Contract." You cannot even *start* the game if the View is incomplete.
+
+---
+
+### Why does the `GameController` care about this "Contract"?
+
+Look at how the `GameController` uses the View in `game_controller.py`:
+
+```python
+class GameController:
+    def __init__(self, view: View, ...):
+        self.view = view # We expect a 'View' object
+
+    def setup_game(self):
+        self.view.clear()       # Contract Step 1
+        self.view.show_title()  # Contract Step 2
+```
+
+Because of the **Contract** defined in `view_interface.py`, the developer writing the `GameController` has **Total Confidence**. They don't need to check if `clear()` exists; the "Contract" guarantees it.
+
+### Summary for your Study:
+*   **Contract:** A promise of behavior.
+*   **`NotImplementedError`:** A "Soft Contract" (fails during execution).
+*   **`ABC` / `@abstractmethod`:** A "Strict Contract" (fails during setup).
+
+**Next up: Polymorphism (The ability to swap these contract-fulfillers at will). Shall we move on?**
