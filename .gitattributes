@@ -1,0 +1,4 @@
+# Enforce standard LF endings for all agentic state files across Windows and Linux
+.agents/history/** text eol=lf
+.agents/artifacts/** text eol=lf
+*.md text eol=lf
