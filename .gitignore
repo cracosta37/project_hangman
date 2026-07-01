@@ -1,2 +1,16 @@
 # Virtual environments
 .venv/
+
+# Ignore global IDE or system assets
+.vscode/
+.DS_Store
+
+# Antigravity State Tracking Configuration
+.agents/*
+!.agents/history/
+!.agents/artifacts/
+!.agents/AGENTS.md
+
+# Ignore machine-specific vector indexes and local compute telemetry
+.agents/cache/
+.agents/telemetry/
