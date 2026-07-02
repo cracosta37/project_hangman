@@ -1,5 +1,7 @@
 # Virtual environments
 .venv/
+.venv-windows/
+.venv-linux/
 
 # Ignore global IDE or system assets
 .vscode/
