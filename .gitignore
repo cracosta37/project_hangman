@@ -1,3 +1,4 @@
 # Virtual environments
 .venv-windows/
 .venv-linux/
+.aider*
