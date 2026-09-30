@@ -276,3 +276,165 @@ Each arrow crosses a **role boundary**, and each role only does its own job.
 4. Run the controller unit tests (`.venv-windows` → `pytest tests/unit/test_game_controller.py`) and observe how a Mock view lets a full game run headless.
 
 **One‑line summary:** The **Model** (`Game`/`Player`) owns state & rules with zero I/O, the **View** (`ConsoleView`) is a dumb display/input layer behind a `View` interface, and the **Controller** (`GameController`) injects the View and routes everything — so any piece can be swapped or tested independently.
+
+---
+---
+
+# Topic 1.2 — Separation of Concerns (SoC)
+
+## What SoC is (the big idea)
+
+**Separation of Concerns** is the principle that each part of a program should be responsible for **exactly one "concern"** — and a *concern* is best defined as **one reason the code might change**.
+
+> **SoC in one sentence:** *Group code by "why it changes," so a change in one area doesn't force edits everywhere else.*
+
+This is the **principle** that *motivates* MVC (topic 1.1). MVC tells you *how* to split by interaction role (Model/View/Controller). SoC tells you *why* that split is good, and it goes **one step further** — it also explains why your project pulled *word loading* and *configuration* into their own modules.
+
+### Concern vs. Coupling (two words to keep straight)
+
+- **Concern** = a category of responsibility (a "reason to change").
+- **Coupling** = how much one piece *depends on / knows about* another.
+
+SoC's goal: **many clean concerns, low coupling between them.** High cohesion *inside* each concern, low coupling *between* concerns.
+
+---
+
+## The concerns in your project
+
+Your codebase is physically organized **one folder per concern**. That directory layout is the single strongest evidence of SoC:
+
+```
+hangman/
+├── model/         ← CONCERN: game rules & state        (Game, Player)
+├── view/          ← CONCERN: display + input / I/O      (View, ConsoleView)
+├── controller/    ← CONCERN: orchestration & flow       (GameController)
+├── services/      ← CONCERN: data access (word bank)    (WordRepository)
+├── data/          ← CONCERN: raw data                   (word_bank.json)
+└── constants.py   ← CONCERN: configuration              (MAX_HEALTH, HANGMAN art)
+```
+
+So the full set of concerns — note that **two of them (data access, configuration) exist *beyond* the M/V/C trio**:
+
+| Concern | "Reason to change" | Lives in |
+|---------|-------------------|----------|
+| **Game rules & state** | The rules change (health, win/lose, repeats) | `model/` → `Game`, `Player` |
+| **User I/O** | The interface changes (console → GUI → web) | `view/` → `ConsoleView` |
+| **Orchestration / flow** | The flow changes (new screens, new prompts) | `controller/` → `GameController` |
+| **Data access** | The word source changes (JSON → DB → API) | `services/` → `WordRepository` |
+| **Configuration** | Tuning changes (max health, ASCII art) | `constants.py` |
+| **Raw data** | The words themselves change | `data/word_bank.json` |
+
+---
+
+## The flagship example: `WordRepository` isolates the data concern
+
+MVC (topic 1.1) never mentions the word bank — but SoC demands its own home. Look at how the **Controller** uses the repository:
+
+```python
+# hangman/controller/game_controller.py:93
+selected = self.word_repo.get_by_difficulty(difficulty)
+```
+
+**That's the entire relationship.** One method call. The controller never:
+- opens a file,
+- parses JSON,
+- validates individual words,
+- normalizes unicode, or
+- tracks which words were already used.
+
+All of that is *hidden inside* `WordRepository`. Let's see what that "one method" actually shields you from — the public API is just **two** methods (`get_by_difficulty`, `reset_session`, `word_repository.py:146` and `:170`), while the private internals do the heavy lifting:
+
+| Hidden inside `WordRepository` | Where | Concern it owns |
+|-------------------------------|-------|-----------------|
+| File-missing check → `FileNotFoundError` | `word_repository.py:44` | data access |
+| JSON parse → `ValueError` on bad JSON | `word_repository.py:47-51` | data access |
+| Accept **two** formats (dict *or* list) | `word_repository.py:53-58` | data access |
+| Per-word validation (type, ≤120 chars, allowed chars, ≥2 letters) | `word_repository.py:84-117` | data quality |
+| Unicode normalization (NFD, strip diacritics, collapse spaces, uppercase) | `word_repository.py:122-141` | data quality |
+| **No-repeat** session tracking (`used_words` set) | `word_repository.py:159-167` | data policy |
+| Random pick from available words | `word_repository.py:165` | data policy |
+
+The user of the class (the controller) sees a clean, narrow door: *"give me a random unused word for this difficulty."* Everything messy is behind that door. **That is SoC in action — one concern, one owner, one narrow interface.**
+
+### The payoff: change the source, touch *one* file
+
+Suppose you later decide the word bank should come from a **SQLite database** instead of a JSON file. Because of SoC:
+
+- `WordRepository._load()` changes (read from DB instead of `json.load`).
+- **Nothing else changes.** `Game`, `Player`, `ConsoleView`, and the `GameController` still call the same `get_by_difficulty(difficulty)` and don't care *where* the word came from.
+
+Compare that to the study guide's point: *"UI modifications (e.g., migrating from terminal to a GUI or Web View) do not require changing the core game logic."* Same logic — swap the concern, leave the rest alone.
+
+---
+
+## Contrast: what the code looks like *without* SoC
+
+Imagine the same game as one tangled function (the anti-pattern every beginner writes first):
+
+```python
+# ❌ NO SoC — every concern glued together
+def main():
+    data = json.load(open("word_bank.json"))     # data access
+    word  = random.choice(data["easy"]).upper()  # data + normalization
+    health = 7                                   # game state
+    while health > 0:
+        letter = input("letter: ")               # I/O
+        if letter in word:                       # game rules
+            print("correct!")                    # display
+        else:
+            health -= 1
+            print("wrong, health", health)       # rules + display mixed
+```
+
+Here a single function owns **six concerns at once**. Now ask: *"what if I change the word source to a database?"* You must edit this same function. *"What if I add a GUI?"* Same function. *"What if health works differently?"* Same function. **Every change ripples through the same tangled code** — that's high coupling and it's why the project grows fragile fast.
+
+Your project's answer: **six separate modules**, each with one job, communicating only through small, well-defined calls.
+
+---
+
+## A subtle (but important) nuance: validation appears in two places
+
+You might notice word validation exists in **two** classes:
+
+- `Game.set_word()` — `game.py:46` (validates a word at **runtime**)
+- `WordRepository._validate_normalize()` — `word_repository.py:84` (validates words at **load time**)
+
+Is that a SoC violation (duplication)? **No.** It's *defense in depth at layer boundaries*, and each concern validates for a different reason:
+
+- The **repository** validates at load time so its *internal store* is always clean (bad entries in the JSON are skipped before they ever exist in memory).
+- The **game** validates at runtime because a word can arrive from a **human moderator** (manual entry in the controller, `game_controller.py:81`), not only from the repository.
+
+The rule of thumb: **each concern owns the validation of the data it is responsible for, at the moment it takes responsibility.** That's SoC applied carefully, not accidentally.
+
+---
+
+## SoC vs. MVC — how they fit together
+
+| | **MVC (1.1)** | **SoC (1.2)** |
+|---|---------------|--------------|
+| **What it is** | A concrete **pattern** (3 roles) | A general **principle** |
+| **Splits by** | Interaction role (who talks to the user) | "Reason to change" / concern |
+| **Covers** | Model, View, Controller | Those **plus** data access (`services/`) and config (`constants.py`) |
+| **Relationship** | One *way to realize* SoC | The *why* behind MVC |
+
+Think of it this way: **MVC is SoC applied to the user-interaction triangle.** Your project follows MVC *and* extends the same idea to data and configuration, which is why the architecture holds together so well.
+
+---
+
+## Why SoC matters here (the "so what?")
+
+- **Change isolation.** Change the word source → only `services/`. Change the rules → only `model/`. Change the UI → only `view/`.
+- **Independent testing.** Each concern has its own test file (`test_game.py`, `test_word_repository.py`, `test_console_view.py`, `test_game_controller.py`) — possible *because* the concerns are decoupled.
+- **Smaller, readable modules.** No file tries to do everything; each is short enough to hold in your head.
+- **Lower risk.** A bug in the word bank can't corrupt game logic, because the two never share state — they only meet through the one-method API.
+
+---
+
+## Quick self‑check (try these to lock it in)
+
+1. In `hangman/controller/game_controller.py`, find **every** place the controller touches the word bank. Confirm it's *always* through `self.word_repo.get_by_difficulty(...)` / `reset_session()` — never `json` or `open()`.
+2. Open `hangman/model/game.py` and confirm it contains **no** file/JSON code. The Model knows nothing about *where* words come from.
+3. Search the whole project for `import json`. You should find it **only** in `services/word_repository.py`. That single search result *proves* the data concern is isolated.
+4. Hypothesis test: if you moved `constants.py`'s `MAX_HEALTH` into `Game`, which concern would leak into which? (Answer: configuration leaks into the rules.) See why keeping them separate is cleaner.
+
+**One-line summary:** **SoC** means grouping code by *reason to change* — in this project that's `model/` (rules), `view/` (I/O), `controller/` (flow), `services/` (data), and `constants.py` (config) — so any single change (new UI, new word source, new rule) touches **one** module and ripples nowhere else.
