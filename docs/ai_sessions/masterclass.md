@@ -438,3 +438,242 @@ Think of it this way: **MVC is SoC applied to the user-interaction triangle.** Y
 4. Hypothesis test: if you moved `constants.py`'s `MAX_HEALTH` into `Game`, which concern would leak into which? (Answer: configuration leaks into the rules.) See why keeping them separate is cleaner.
 
 **One-line summary:** **SoC** means grouping code by *reason to change* — in this project that's `model/` (rules), `view/` (I/O), `controller/` (flow), `services/` (data), and `constants.py` (config) — so any single change (new UI, new word source, new rule) touches **one** module and ripples nowhere else.
+
+---
+---
+
+# Topic 1.3 — Dependency Injection (DI)
+
+## 1. What is Dependency Injection?
+
+**Dependency Injection** is a technique where an object does **not** create the other objects it needs (its *dependencies*) internally. Instead, those dependencies are **passed in from outside** — usually through the constructor.
+
+A simple analogy:
+
+- **Without DI:** a restaurant where the chef grows the vegetables, raises the chickens, and bakes the bread himself. Everything is tied together.
+- **With DI:** the chef receives the ingredients from a supplier. The chef's job stays focused, and if you change the supplier (or test with fake ingredients), the chef's work doesn't change.
+
+The key terms:
+
+- **Dependency** — anything an object needs to do its job (a view, a config module, a data repository...).
+- **Inject** — "hand it in" from outside, typically as a constructor argument.
+- **Loose coupling** — the object depends on *what it needs* (a contract), not on *how that thing was built*.
+
+The most common form is **constructor injection**, which is exactly what this codebase uses.
+
+---
+
+## 2. The main example: the View injected into `GameController`
+
+### 2.1 The dependency the controller needs
+
+The controller's entire job is to orchestrate I/O: show the board, ask for a guess, print errors. It needs a *view* object, but it does **not** decide what kind of view. Look at its constructor:
+
+```python
+# hangman/controller/game_controller.py:16
+def __init__(self, view: ConsoleView, constants_module):
+    self.view = view
+    self.c = constants_module
+```
+
+The controller **never writes** `view = ConsoleView()` inside itself. It simply stores what it was given. Everywhere in its methods it calls `self.view.display(...)`, `self.view.prompt(...)`, `self.view.show_word(...)` — e.g.:
+
+```python
+# game_controller.py:161-163
+self.view.display(f"Player: {player.name}.\n")
+self.view.show_health(player)
+self.view.show_word(self.game.get_visible_word())
+```
+
+### 2.2 The contract: the `View` interface
+
+The controller relies on a *contract*, defined in `hangman/view/view_interface.py:4`:
+
+```python
+class View:
+    """Abstract interface for user interaction."""
+
+    def display(self, message: str) -> None: raise NotImplementedError
+    def prompt(self, message: str) -> str:   raise NotImplementedError
+    def show_word(self, word_state: List[str]) -> None: raise NotImplementedError
+    ...
+```
+
+`ConsoleView` (hangman/view/console_view.py:8) fulfils that contract by implementing each method with real `print`/`input` calls. Because the controller only ever calls methods declared in `View`, **any** class implementing those same methods could be handed in — a `PygameView`, a `TkinterView`, a web view, or a fake for tests. That is the study guide's point: *"any concrete class (e.g., `ConsoleView`, `PygameView`, `TkinterView`) can be substituted transparently."*
+
+> **Tutor's note (honest observation):** in the actual code the parameter is typed as `view: ConsoleView` (the concrete class), while the study guide says the controller is "typed against the base interface." Functionally it works fine, but the *textbook-correct* version — and a good exercise for you — would be:
+> ```python
+> from hangman.view.view_interface import View
+>
+> def __init__(self, view: View, constants_module):
+> ```
+> That makes the "program to an interface, not to an implementation" rule visible in the type hints.
+
+### 2.3 Where the injection happens: the composition root
+
+Someone still has to create the `ConsoleView` and hand it over. That "wiring" code lives in the **composition root** — the entry point of the application, `run.py:6-9`:
+
+```python
+def run():
+        view = ConsoleView()
+        controller = GameController(view=view, constants_module=constants)
+        controller.start()
+```
+
+The **composition root** is the single place that knows the concrete classes and assembles the object graph. Everything else (controller, model, views) stays ignorant of the concrete details.
+
+---
+
+## 3. A second example: the `constants` module injected
+
+DI isn't only for objects — this project also injects a **module** (a bag of configuration values) as a dependency.
+
+`hangman/constants.py` holds configuration: `MAX_HEALTH = 7` and the `HANGMAN` ASCII art list. Instead of the model and controller importing it themselves and hard-coding it, it is passed in:
+
+```python
+# game_controller.py:16-18
+def __init__(self, view: ConsoleView, constants_module):
+    self.view = view
+    self.c = constants_module
+```
+
+```python
+# hangman/model/game.py:11-12
+def __init__(self, constants_module, normalize_input: bool = True):
+    self.c = constants_module
+```
+
+Notice the chain in `setup_game` (game_controller.py:73): the controller forwards its own injected `self.c` to the `Game` model:
+
+```python
+self.game = Game(constants_module=self.c, normalize_input=normalize)
+```
+
+The benefits here (matching the study guide's "Configuration Externalization"):
+
+- If you want a different max health or different graphics, you create a different constants module and inject it — **no code changes**.
+- Tests can pass a `Mock()` as constants and not care about the real values at all.
+
+---
+
+## 4. The payoff: testing without a real terminal
+
+This is the whole *reason* DI exists, and the codebase proves it in `tests/unit/test_game_controller.py`.
+
+### 4.1 Injecting a fake view
+
+The `controller_factory` fixture (test_game_controller.py:66-75) builds a controller with a **`Mock` instead of a real view**:
+
+```python
+@pytest.fixture
+def controller_factory(view_factory, game_factory, word_repo_factory):
+    def _factory():
+        view = view_factory()                      # <- a Mock, not a ConsoleView
+        controller = GameController(view=view, constants_module=Mock())
+        controller.game = game_factory()           # <- a Mock model too
+        controller.word_repo = word_repo_factory() # <- a Mock repository
+        return controller, view
+    return _factory
+```
+
+The `view_factory` fixture (lines 11-27) just creates `view = Mock()` and gives its methods harmless default return values. Because of DI, this "drop-in fake" satisfies the controller completely — the controller doesn't know or care that it isn't a `ConsoleView`.
+
+### 4.2 Simulating a whole game session
+
+With the real `ConsoleView`, testing the controller would require a human typing at a terminal. With the injected mock, the test **scripts the user's keystrokes** using `side_effect`:
+
+```python
+# test_game_controller.py:208-215
+with patch("hangman.controller.game_controller.Game", return_value=mock_game):
+    view.prompt.side_effect = ["Y", "1", "1", "Alice"]
+    view.prompt_hidden.side_effect = ["bad", "good"]
+
+    controller.setup_game()
+
+assert mock_game.set_word.call_count == 2
+```
+
+Read this like a story: the simulated user answers `"Y"` (enable normalization), `"1"` (manual word source), `"1"` (one player), `"Alice"` (name); the hidden prompt first returns `"bad"` (rejected by the model → retry) then `"good"` (accepted). The test then asserts the model received `set_word` **twice**. No terminal, no keyboard, instant and repeatable.
+
+### 4.3 Checking the exact output sequence
+
+Because `view` is a mock, every call the controller makes is **recorded**, so tests can verify what the player would have seen:
+
+```python
+# test_game_controller.py:490
+view.display.assert_any_call("Sorry, the letter 'Z' is not in the word.\n")
+
+# test_game_controller.py:369
+view.display.assert_any_call("Player: Alice.\n")
+
+# test_game_controller.py:603
+for call in view.display.call_args_list:
+    assert "has been eliminated" not in call.args[0]
+```
+
+That last pattern is worth studying: it asserts a message was *not* printed — something you could never verify reliably against a real console.
+
+This is exactly what the study guide describes: *"allows tests to inject mock versions of the view, checking output sequences without opening a real terminal or expecting actual keyboard inputs."*
+
+---
+
+## 5. Contrast: what the code would look like **without** DI
+
+To really see the value, here is the tightly-coupled alternative:
+
+```python
+# BAD: no DI
+from hangman.view.console_view import ConsoleView
+from hangman import constants
+
+class GameController:
+    def __init__(self):
+        self.view = ConsoleView()        # hard-coded dependency
+        self.c = constants               # hard-coded dependency
+```
+
+Problems with that version:
+
+1. **Untestable in isolation** — every controller test would print to the real console and block on real `input()`.
+2. **Unswap-able** — migrating to a GUI or web frontend means editing the controller.
+3. **Hidden configuration** — the constants are baked in; changing `MAX_HEALTH` behavior in tests is impossible.
+
+With DI, the controller file contains **zero** `ConsoleView()` instantiations. Its only imports of concrete UI code exist today because of the type hint; the behavior depends purely on the constructor arguments.
+
+---
+
+## 6. One more thing to notice: where DI is *not* applied yet
+
+As a careful reader, compare the two dependencies of the controller:
+
+```python
+# game_controller.py:16-22
+def __init__(self, view: ConsoleView, constants_module):
+    self.view = view
+    self.c = constants_module
+    ...
+    self.word_repo = WordRepository(BASE_DIR / "data" / "word_bank.json")  # created internally!
+```
+
+`view` and `constants_module` are injected, but `word_repo` is **constructed inside** the controller with a hard-coded file path. In tests it works around this by overwriting the attribute after construction (test_game_controller.py:72: `controller.word_repo = word_repo_factory()`). A more consistent design would inject it the same way:
+
+```python
+def __init__(self, view: View, constants_module, word_repo: WordRepository):
+```
+
+This is a great self-exercise: apply constructor injection to `word_repo`, update `run.py` (the composition root) to pass a real `WordRepository`, and update the test fixtures accordingly. You'll end up with a fully DI-consistent object graph.
+
+---
+
+## 7. Summary
+
+| Concept | Where you see it in this codebase |
+|---|---|
+| Dependency passed via constructor | `GameController(view=..., constants_module=...)` at game_controller.py:16; `Game(constants_module=...)` at game.py:11 |
+| Composition root (wiring) | `run.py:6-9` creates `ConsoleView` and injects it |
+| Program to an interface | `View` base class (view_interface.py:4) defines the contract the controller calls |
+| Loose coupling benefit | A `PygameView`/`TkinterView` could replace `ConsoleView` with no controller changes |
+| Testability benefit | `test_game_controller.py` injects a `Mock` view, scripts keystrokes with `side_effect`, and asserts exact output sequences |
+| Configuration externalization | `constants` module injected instead of imported and hard-coded |
+
+The one-sentence takeaway: **DI means "give me what I need, don't make me build it"** — and in this project it's what turns an interactive terminal game into something that can be tested line by line with pure pytest.
