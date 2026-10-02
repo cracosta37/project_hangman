@@ -677,3 +677,241 @@ This is a great self-exercise: apply constructor injection to `word_repo`, updat
 | Configuration externalization | `constants` module injected instead of imported and hard-coded |
 
 The one-sentence takeaway: **DI means "give me what I need, don't make me build it"** — and in this project it's what turns an interactive terminal game into something that can be tested line by line with pure pytest.
+
+---
+
+# Topic 1.4: Program to Interfaces, Not Implementations
+
+## 1. The core idea in one sentence
+
+Write your code so it depends on a **contract** ("a view *can* display, prompt, and clear"), never on a **specific machine** that fulfills it ("a *console* view"). The concrete class is a **pluggable detail** chosen at the very last moment, at the edge of the program.
+
+Think of it like a power socket: your lamp (the controller) depends on "a 230V socket", not on "the exact socket wired into this wall by this specific electrician". You can swap sockets (console view, GUI view, mock view) and the lamp keeps working — as long as every socket follows the same standard (the interface).
+
+In design-patterns language this is the **Liskov Substitution Principle** plus **dependency inversion**: high-level modules (the controller) must not depend on low-level modules (a specific view); both should depend on an abstraction.
+
+---
+
+## 2. The three roles in your codebase
+
+Your project is a textbook example. There are exactly three actors:
+
+| Role | Class | File |
+|---|---|---|
+| **The contract (interface)** | `View` | `hangman/view/view_interface.py` |
+| **The implementation** | `ConsoleView` | `hangman/view/console_view.py` |
+| **The consumer** | `GameController` | `hangman/controller/game_controller.py` |
+| **The "wiring" (composition root)** | `run()` | `run.py` |
+
+### 2.1 The contract: `View` (`hangman/view/view_interface.py:4`)
+
+```python
+class View:
+    """Abstract interface for user interaction."""
+
+    def display(self, message: str) -> None:
+        raise NotImplementedError
+
+    def show_title(self) -> None:
+        raise NotImplementedError
+    def prompt(self, message: str) -> str:
+        raise NotImplementedError
+    def prompt_hidden(self, message: str) -> str:
+        raise NotImplementedError
+    def pause(self, message: str = "Press Enter to continue...") -> None:
+        raise NotImplementedError
+    def clear(self) -> None:
+        raise NotImplementedError
+    def show_word(self, word_state: List[str]) -> None:
+        raise NotImplementedError
+    def show_health(self, player) -> None:
+        raise NotImplementedError
+```
+
+Read this class and answer one question: **does it say anything about *how*?** No. No `print`, no `os.system`, no `getpass`. It only declares **8 verbs** and their signatures (parameter names, types, defaults, return types). That's the whole contract:
+
+- `display(message) -> None` — "you can show a message"
+- `prompt(message) -> str` — "you can ask a question and hand back a string"
+- `pause(message=...) -> None` — "you can wait; note the default argument is part of the contract too"
+- ...and so on.
+
+`raise NotImplementedError` is Python's idiomatic "this method is a promise, not a body" marker. It means: *if you ever call this method on something that forgot to override it, you get a loud, immediate error* — instead of silently doing nothing.
+
+### 2.2 The implementation: `ConsoleView` (`hangman/view/console_view.py:8`)
+
+```python
+class ConsoleView(View):
+    """Handles all console-based input and output operations."""
+
+    def display(self, message: str) -> None:
+        print(message)
+
+    def prompt(self, message: str) -> str:
+        try:
+            return input(message)
+        except (KeyboardInterrupt, EOFError):
+            ...
+            exit(0)
+
+    def show_word(self, word_state: List[str]) -> None:
+        print(f"    {' '.join(word_state)}\n")
+    # ...
+```
+
+This is where all the *how* lives: `print`, `input`, `getpass`, `os.system('cls'/'clear')`, Ctrl+C handling. The inheritance `ConsoleView(View)` is the declaration: **"I guarantee everything the View contract promises, here's my recipe for each promise."**
+
+### 2.3 The consumer: `GameController` (`hangman/controller/game_controller.py`)
+
+Now look at how the controller uses its view. Scan through `setup_game`, `run_game_loop`, `handle_letter_guess`... every single interaction goes through the **contract verbs**:
+
+```python
+self.view.clear()                                   # game_controller.py:70
+self.view.show_title()                              # game_controller.py:71
+response = self.view.prompt("Enable accent ...")    # game_controller.py:30
+self.view.prompt_hidden("Please insert the word...")# game_controller.py:81
+self.view.show_health(player)                       # game_controller.py:162
+self.view.show_word(self.game.get_visible_word())   # game_controller.py:163
+self.view.pause("Press Enter to continue...")       # game_controller.py:232
+```
+
+Nowhere in the controller does it say `print(...)`, `input(...)`, or `isinstance(self.view, ConsoleView)`. The controller treats `self.view` as a **black box that obeys the 8-verb contract**. It genuinely doesn't know — and doesn't care — whether the box is a terminal, a window, or a fake.
+
+### 2.4 The wiring: `run.py` (the composition root)
+
+The *only* place in the entire program where the implementation is named:
+
+```python
+def run():
+        view = ConsoleView()                                        # ← the choice is made here, once
+        controller = GameController(view=view, constants_module=constants)
+        controller.start()
+```
+
+This is **dependency injection** in action: the controller receives the view through its constructor (`game_controller.py:16`) instead of building it itself. So the substitution point is isolated to 3 lines in `run.py`.
+
+---
+
+## 3. The payoff #1: transparent substitution
+
+Because the controller only speaks the `View` language, this hypothetical class would be a **drop-in replacement**:
+
+```python
+from hangman.view.view_interface import View
+
+class PygameView(View):
+    def display(self, message: str) -> None:
+        # draw text on a pygame surface...
+        ...
+    def prompt(self, message: str) -> str:
+        # wait for keyboard events, return the typed string
+        ...
+    def show_health(self, player) -> None:
+        # render the hangman figure as sprites using player.hangman_states
+        ...
+    # ... all 8 methods ...
+```
+
+And to switch the whole game from terminal to window, you change **one line** in `run.py`:
+
+```python
+view = PygameView()   # was: ConsoleView()
+```
+
+Zero changes to `GameController`, `Game`, `Player`, `WordRepository`. This is exactly what the study guide means by: *"UI modifications (e.g., migrating from terminal to a GUI) do not require changing the core game logic."*
+
+Note what `PygameView` must **not** be tempted to do: invent extra requirements on the model. The contract only hands it `word_state: List[str]` and a `player` object, so it must work with that. Symmetrically, the controller must only ever call the 8 contract methods — if it needed a 9th capability, the correct move is to *grow the interface first*, then implement it in every view.
+
+---
+
+## 4. The payoff #2: testability (the big one)
+
+This is where the principle pays for itself, and your test suite shows it beautifully.
+
+### 4.1 `tests/unit/test_game_controller.py:11-27`
+
+```python
+@pytest.fixture
+def view_factory():
+    def _factory():
+        view = Mock()
+        view.prompt.return_value = ""
+        view.prompt_hidden.return_value = ""
+        view.display.return_value = None
+        # ...
+        return view
+    return _factory
+```
+
+A `Mock` is, effectively, a class that "implements" *any* interface on demand. Because the controller only speaks the `View` contract, a `Mock` **is a valid View as far as the controller is concerned**. So the entire controller can be tested:
+
+- **without opening a terminal** (no `input()` to hang on),
+- **without any real display**,
+- by feeding scripted answers: `view.prompt.side_effect = ["Y", "1", "2", "Alice", "Bob"]` (test_game_controller.py:182-189),
+- and by *asserting on the exact output sequence*: `view.display.assert_any_call("That name is already taken. Please choose another name.\n")` (test_game_controller.py:273).
+
+Imagine instead the controller had done `input()`/`print()` directly (the "programming to the implementation" anti-pattern). Testing it would require real stdin/stdout, monkeypatching builtins, and you could never verify "the user saw message A *then* was asked B". The interface is what makes the 700+ line controller testable line by line.
+
+### 4.2 `tests/unit/test_view_interface.py` — policing the contract itself
+
+The second test file is dedicated to the interface. Two highlights:
+
+- `test_all_methods_raise_not_implemented` (line 36): parametrized over **all 8 methods**, verifying the abstract contract still exists — i.e., `View` itself must never acquire a real body.
+- `test_all_methods_exist` (line 173): guards against *accidentally deleting* a contract method, which would silently break every implementation.
+- `test_pause_signature` (line 75): even the **default argument value** of `pause` is asserted as part of the contract.
+
+Together they mean: the contract is treated as a first-class, versioned artifact — change it deliberately, and the tests tell you.
+
+---
+
+## 5. Python-specific notes
+
+- **Duck typing vs. ABC.** Python doesn't force interfaces. You could have used `abc.ABC` + `@abstractmethod`, which makes `PygameView` *fail at construction* if it forgets one method. This project instead uses the lighter "base class + `raise NotImplementedError`" convention (see `test_view_is_instantiable`, test_view_interface.py:163, which even documents that this is a deliberate "non-ABC design"). Both are valid; the ABC version is stricter, the current version is more Pythonic/loose.
+- **Type hints document the intent.** `prompt(self, message: str) -> str` in the interface is where the contract's *typing* lives; implementations inherit that expectation.
+- **The Liskov check you can do mentally:** everywhere you see `self.view.X(...)` in the controller, `X` must exist in `View` with a compatible signature. If that's always true, any `View` subclass is swappable.
+
+---
+
+## 6. Two real deviations in this codebase (great critical-thinking exercises)
+
+A good tutor points at the blemishes, because they're where you learn fastest. There are two places where this project *bends* the very principle it preaches:
+
+### 6.1 The type hint says the wrong class — `game_controller.py:16`
+
+```python
+def __init__(self, view: ConsoleView, constants_module):
+```
+
+The annotation says `ConsoleView` (the **implementation**), but the study guide says the controller "is typed against the base interface". The code still *behaves* correctly (it only calls contract methods, and `run.py` injects a `ConsoleView`), and in tests a `Mock` slips in because Python doesn't enforce annotations. But the annotation is a lie that will confuse future readers and IDEs. The principled fix:
+
+```python
+from hangman.view.view_interface import View
+
+def __init__(self, view: View, constants_module):
+```
+
+Now the *type system itself* encodes "any View will do" — and if someone passes a `PygameView`, it's honest; if they pass a random object, mypy will complain.
+
+### 6.2 A contract violation the mocks hide — `game_controller.py:412`
+
+```python
+choice = self.view.get_choice(["1", "2", "3"])
+```
+
+`get_choice` is **not in the `View` interface** (`view_interface.py`) and **not implemented in `ConsoleView`** (`console_view.py`). Two consequences:
+
+1. In production, if the word bank runs dry during `start()`, the real app would crash with `AttributeError: 'ConsoleView' object has no attribute 'get_choice'` — the interface promised 8 verbs, and the consumer demanded a 9th.
+2. The tests never catch it, because `Mock` happily fabricates *any* attribute: `view.get_choice.return_value = "1"` (test_game_controller.py:24). This is the classic danger of mocking: **a mock is too permissive — it validates that you called things, not that the object you called them on is actually allowed to have them.**
+
+The correct fix, following the principle: add `get_choice` (or reuse `prompt` in a loop, which needs no interface change) to `View` first, then implement it in `ConsoleView`, then use it in the controller. That's the workflow — *grow the contract, then grow the implementations* — that keeps the substitution guarantee intact.
+
+---
+
+## 7. Checklist to verify the principle in any codebase
+
+1. Find the base/abstract class with `NotImplementedError` (or ABC) bodies → that's the **interface**.
+2. Find who *constructs* the concrete class. It should be exactly **one place** at the program's edge (here: `run.py`).
+3. Grep the consumer for the concrete class name. It should appear **nowhere** except imports in the wiring file. (Here it *does* appear — in the type hint at `game_controller.py:16` — that's the deviation.)
+4. Grep the consumer for method calls on the injected dependency; verify each one exists in the interface. (Here: `get_choice` fails this check.)
+5. Check the tests: are they injecting a `Mock`/fake for that dependency? If yes, the principle is working for you.
+
+**Bottom line:** `View` is a *promise*, `ConsoleView` is *one way of keeping it*, `GameController` is *the one who trusts the promise*, and `run.py` is *the one who picks the keeper*. Keep those four roles separated, and swapping terminal → GUI → mock becomes a one-line change — which is precisely what makes this codebase testable and extensible.
