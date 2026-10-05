@@ -915,3 +915,202 @@ The correct fix, following the principle: add `get_choice` (or reuse `prompt` in
 5. Check the tests: are they injecting a `Mock`/fake for that dependency? If yes, the principle is working for you.
 
 **Bottom line:** `View` is a *promise*, `ConsoleView` is *one way of keeping it*, `GameController` is *the one who trusts the promise*, and `run.py` is *the one who picks the keeper*. Keep those four roles separated, and swapping terminal → GUI → mock becomes a one-line change — which is precisely what makes this codebase testable and extensible.
+
+---
+---
+
+# Topic 1.5 — Duck Typing vs. ABC: Two Ways to Enforce a Contract
+
+*Deep dive into the "Duck typing vs. ABC" note from Topic 1.4 (§5), including the `test_view_is_instantiable` evidence explained line by line.*
+
+## 1. The problem being solved
+
+`GameController` calls 8 methods on `self.view` (`display`, `prompt`, `show_word`, ...). The `View` base class is a *promise*: "anything I accept must have these 8 methods." But in Python that promise is just documentation — **the language enforces nothing** (unlike Java or C#). So the real question is:
+
+> *When, and how, does a `PygameView` that forgot to implement `show_word` get caught?*
+
+There are two valid answers. This project deliberately picks the looser one.
+
+## 2. Option A — what this project does: base class + `raise NotImplementedError`
+
+```python
+# hangman/view/view_interface.py
+class View:
+    def display(self, message: str) -> None:
+        raise NotImplementedError
+    # ... 8 methods, all "empty promises"
+```
+
+Two ideas combined:
+
+1. **Duck typing** — "if it quacks like a duck, it's a duck." Python judges an object by what it *can do*, not what it *declares*. A class that has the 8 methods works as a view **even if it never inherits from `View`**. There is no formal "implements" keyword in Python.
+2. **`raise NotImplementedError`** — a loud trap. If some view forgets to override a method, calling it crashes *at that exact call* with `NotImplementedError` instead of silently doing nothing.
+
+**When it fails: late.** You can construct `PygameView()` perfectly fine. The error only appears when the game actually reaches that method (e.g., the first `show_word` call during play).
+
+## 3. Option B — ABC: the stricter alternative
+
+```python
+import abc
+
+class View(abc.ABC):
+    @abc.abstractmethod
+    def display(self, message: str) -> None: ...
+    # ... all 8 methods marked @abstractmethod
+```
+
+Now Python *itself* enforces the contract. A `PygameView(View)` that forgets even one method fails **at construction**:
+
+```python
+view = PygameView()
+# TypeError: Can't instantiate abstract class PygameView
+#            with abstract method show_word
+```
+
+**When it fails: early (fail-fast)** — at the single line in `run.py` where the view is created, before any game logic runs.
+
+## 4. Side by side
+
+| | Duck typing + `NotImplementedError` (current) | ABC |
+|---|---|---|
+| A view forgets a method | Crashes at runtime, when that method is first called | Crashes immediately at `PygameView()` |
+| Can you call `View()` itself? | **Yes** | **No** → `TypeError` |
+| Must a view inherit from `View`? | No — any object with the 8 methods works | Yes |
+| Enforced by | Tests + convention | The language itself |
+| Style | Loose, "Pythonic" | Strict, closer to Java/C# interfaces |
+
+## 5. The evidence: `test_view_is_instantiable`
+
+### 5.1 The vocabulary: what does "instantiable" mean?
+
+**To instantiate** a class means to *create an object from it* — the parentheses:
+
+```python
+View()        # ← these parentheses are "instantiation"
+view = View()
+```
+
+So **"View is instantiable"** simply means: *the line `view = View()` is allowed and doesn't crash.* That's all the word means.
+
+### 5.2 What the test does, line by line
+
+```python
+# tests/unit/test_view_interface.py:163
+def test_view_is_instantiable():
+    """The interface can currently be instantiated (non-ABC design)."""
+    view = View()                          # create a View object
+    assert isinstance(view, View)          # check it really is one
+```
+
+- `view = View()` — "make me a View object." If the project used an ABC, **this exact line would crash** with `TypeError` (see §5.4, section 1).
+- `assert isinstance(view, View)` — `assert` means "I promise this is true; if it's false, the test fails." `isinstance(view, View)` asks "is `view` an object of class `View`?" Trivially yes, but it makes the intent explicit.
+
+In plain English the test says: **"I expect `View()` to work. If it ever stops working, something changed in the design."**
+
+### 5.3 Why this is *evidence*
+
+> **A passing test is a frozen decision.**
+
+The author of this test sat down at some moment and asked: *"Should `View` be a true ABC (un-instantiable), or a loose base class (instantiable)?"* They **chose** the loose design — and then wrote that choice down *as a test*, so the decision can't be silently erased later.
+
+The docstring is the author talking to the future reader:
+
+```python
+"""The interface can currently be instantiated (non-ABC design)."""
+```
+
+"non-ABC design" = *"Hey, I know ABCs are a popular way to do this. I deliberately did NOT use one. This test exists so nobody 'fixes' it by accident."*
+
+Now imagine a month from now someone reads a blog post saying "always use ABCs!" and rewrites the interface:
+
+```python
+import abc
+
+class View(abc.ABC):
+    @abc.abstractmethod
+    def display(self, message: str) -> None: ...
+```
+
+Then `pytest` runs and `test_view_is_instantiable` **fails immediately**:
+
+```
+tests/unit/test_view_interface.py:165: in test_view_is_instantiable
+    view = View()
+E   TypeError: Can't instantiate abstract class View ...
+```
+
+The test catches the design change and forces a conscious decision: "do I really want ABC now? Then I must also delete/rewrite this test." The design can only change **on purpose, with a visible test change** — never by accident.
+
+### 5.4 Live demo: loose vs. strict, observed
+
+A self-contained script (save as `abc_demo.py`, run with `python3 abc_demo.py`):
+
+```python
+import abc
+
+# ---------- Design A: what the project actually has (loose) ----------
+class ViewLoose:
+    def display(self, message):
+        raise NotImplementedError
+
+# ---------- Design B: the stricter ABC alternative ----------
+class ViewStrict(abc.ABC):
+    @abc.abstractmethod
+    def display(self, message):
+        ...
+
+# 1) Can you create an object of the BASE class itself?
+ViewLoose()          # works
+ViewStrict()         # TypeError
+
+# 2) A "bad" view that forgets to implement display()
+class BadLoose(ViewLoose):
+    pass             # forgot display!
+class BadStrict(ViewStrict):
+    pass             # forgot display!
+
+BadLoose()           # works (no complaint yet!)
+BadStrict()          # TypeError
+
+# 3) When does the "bad loose view" finally explode?
+bad = BadLoose()
+bad.display("hello") # NotImplementedError — at CALL time
+```
+
+Observed output (addresses abbreviated):
+
+```
+=== 1) Can you create an object of the BASE class itself? ===
+Loose  design: ViewLoose()  -> <__main__.ViewLoose object at 0x...>
+Strict design: ViewStrict() -> TypeError: Can't instantiate abstract class ViewStrict without an implementation for abstract method 'display'
+
+=== 2) A 'bad' view that forgets to implement display() ===
+Loose  design: BadLoose()  -> <__main__.BadLoose object at 0x...>  (construction OK!)
+Strict design: BadStrict() -> TypeError: Can't instantiate abstract class BadStrict without an implementation for abstract method 'display'
+
+=== 3) When does the 'bad loose view' finally explode? ===
+bad.display('hello') -> NotImplementedError
+It only failed HERE, at CALL time, long after construction.
+```
+
+| Question | Loose design (this project) | ABC design |
+|---|---|---|
+| Can I do `View()`? | ✅ Yes — that's exactly what the test checks | ❌ `TypeError` — the test would fail |
+| `BadView(View)` forgets `display` — can I do `BadView()`? | ✅ Yes (no complaint yet!) | ❌ `TypeError` right at construction |
+| When does `BadView` finally break? | **Late**: first `bad.display(...)` call → `NotImplementedError` | **Early**: it's never built in the first place |
+
+That last row is the *price* of the loose design: it's more permissive, so mistakes surface later. The project compensates by testing the contract heavily — `test_all_methods_raise_not_implemented` (line 36), `test_all_methods_exist` (line 173), and `test_pause_signature` (line 75) in the same file.
+
+## 6. The beginner mental model
+
+> **In Python, tests are written promises. A test like `test_view_is_instantiable` doesn't just check behavior — it records *which design was chosen on purpose*, so the choice stays visible and protected.**
+
+You'll see this pattern everywhere in professional code: a seemingly odd test with a docstring explaining *why* something is the way it is. That's not redundancy — it's documentation that the computer actually enforces for you, every time `pytest` runs.
+
+## 7. Quick self-check (try these to lock it in)
+
+1. Run the §5.4 demo. Confirm the three observations: the loose base class is instantiable, the bad loose subclass is instantiable, and it only explodes at call time.
+2. In a **scratch copy** (not the real file), convert `hangman/view/view_interface.py` to an ABC, run `pytest tests/unit/test_view_interface.py`, and watch `test_view_is_instantiable` fail. Revert.
+3. In `tests/unit/test_view_interface.py:165`, imagine changing `View()` to `ConsoleView()`. The test would still pass — so it would *not* catch a "switch to ConsoleView" change. What assertion would guarantee "View itself must stay the base class"? (Hint: `type(view) is View`.)
+
+**One‑line summary:** The project enforces the `View` contract with the looser Pythonic convention (duck typing + `raise NotImplementedError`), and `test_view_is_instantiable` is the *evidence* that this was a deliberate "non-ABC design" — a passing test that freezes the decision and makes any switch to ABC a visible, on-purpose change.
