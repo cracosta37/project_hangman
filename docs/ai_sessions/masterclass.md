@@ -1114,3 +1114,225 @@ You'll see this pattern everywhere in professional code: a seemingly odd test wi
 3. In `tests/unit/test_view_interface.py:165`, imagine changing `View()` to `ConsoleView()`. The test would still pass — so it would *not* catch a "switch to ConsoleView" change. What assertion would guarantee "View itself must stay the base class"? (Hint: `type(view) is View`.)
 
 **One‑line summary:** The project enforces the `View` contract with the looser Pythonic convention (duck typing + `raise NotImplementedError`), and `test_view_is_instantiable` is the *evidence* that this was a deliberate "non-ABC design" — a passing test that freezes the decision and makes any switch to ABC a visible, on-purpose change.
+
+---
+---
+
+# Topic 2.1 — Encapsulation & Information Hiding
+
+## The core idea
+
+Two related concepts:
+
+- **Encapsulation**: bundling data (attributes) and the behavior that operates on that data (methods) inside a single unit — a class.
+- **Information hiding**: the class keeps its *internal representation* private and exposes only a small, controlled **public interface**. Callers use the interface; they never need to know (or touch) how the data is stored internally.
+
+The payoff: you can change *how* a class stores or computes something without breaking any code that uses it, and you can **protect invariants** (rules that must always be true) by funneling all changes through methods that enforce them.
+
+> Python note: Python has **no real `private` keyword**. It uses *conventions*:
+> - `_name` → "internal use, don't touch from outside" (soft, honor-system privacy)
+> - `__name` → name-mangling (hard privacy, `self.__x` becomes `self._ClassName__x`)
+>
+> Your project uses the first convention everywhere — the idiomatic Python style.
+
+---
+
+## Example 1: `Player` — the textbook case (`hangman/model/player.py`)
+
+```python
+class Player:
+    """Represents a player in the Hangman game."""
+
+    def __init__(self, name: str, max_health: int, hangman_states: List[str]):
+        self.name: str = name
+        self.max_health: int = max_health
+        self.health: int = max_health
+        self.hangman_states: List[str] = hangman_states
+
+    def lose_health(self) -> bool:
+        previous = self.health
+        self.health = max(0, self.health - 1)
+        return previous > 0 and self.health == 0
+
+    def is_alive(self) -> bool:
+        return self.health > 0
+```
+
+### What's hidden, and what's exposed?
+
+The raw fact is `self.health`. But the *meaningful operations* are wrapped in two methods:
+
+**`lose_health()` (player.py:13-16)** encapsulates three rules that must *always* hold together:
+1. Health drops by exactly 1 per mistake.
+2. Health **never goes below zero** — `max(0, self.health - 1)` clamps it.
+3. It *reports* the transition: returns `True` only on the exact turn where the player dies.
+
+**`is_alive()` (player.py:18-19)** encapsulates the definition of "alive" in one place.
+
+### "What if" — without encapsulation
+
+Imagine the controller did this instead:
+
+```python
+# BAD: the controller reaches into Player's internals
+player.health -= 1
+if player.health == 0:
+    self.game.remaining_players -= 1
+```
+
+Problems this creates:
+- The "don't go negative" rule is now the *controller's* responsibility. Tomorrow someone writes `player.health -= 2` or forgets the clamp, and a player has `-3` health — an **invalid state** your game can silently propagate.
+- "What does death mean?" (`health == 0`?) is now duplicated in the controller and possibly the view. Change the rule (e.g., "eliminated at health < 2") and you must hunt down every copy.
+- With `lose_health()`, there is **exactly one place** where health changes, so the invariant can never be violated.
+
+### Who respects the boundary?
+
+The controller never touches `health` to make decisions — it asks:
+
+```python
+# game_controller.py:156
+if not player.is_alive():
+    i += 1
+    continue
+```
+
+And the view just *reads* the state to render the ASCII art:
+
+```python
+# console_view.py:52-53
+def show_health(self, player) -> None:
+    print(player.hangman_states[player.health])
+```
+
+The view is "dumb": it displays whatever the player object reports. It doesn't know or care how health is managed.
+
+---
+
+## Example 2: `Game` — internal state + a status-dictionary interface (`hangman/model/game.py`)
+
+`Game` holds all the sensitive internal state (game.py:15-22):
+
+```python
+self.word: str = ""
+self.unknown_word: List[str] = []
+self.remaining_letters: set[str] = set()
+self.remaining_players: int = 0
+self.n_players: int = 0
+self.remaining_spaces: int = 0
+self.is_phrase: bool = False
+```
+
+None of these are ever mutated by the controller or view. Instead, `Game` exposes a **public API of action methods** that process input internally and return a *status dictionary*:
+
+```python
+def guess_letter(self, player_index: int, raw_letter: str) -> Dict[str, Any]:
+    ...
+```
+
+`guess_letter()` (game.py:127-194) is where the information hiding pays off. Look at what must happen **atomically and in the right order** for one guess:
+
+1. Validate the player index and that the player is alive (game.py:128-133)
+2. Validate the raw input is a single letter (game.py:136-141)
+3. Normalize it (game.py:143)
+4. Check it wasn't already used (game.py:146-151)
+5. **Consume** it: `self.remaining_letters.remove(letter)` (game.py:154)
+6. Find all positions, reveal them in `unknown_word`, decrement `remaining_spaces` (game.py:155-156, 176-178)
+7. On a miss: call `player.lose_health()`, update `remaining_players` (game.py:159-162)
+8. Determine win/over and return a structured report (game.py:183-194)
+
+The controller's entire job is to **send input in, read the report out** (game_controller.py:241-256):
+
+```python
+raw_letter = self.view.prompt("Please insert a letter: ")
+result = self.game.guess_letter(player_index, raw_letter)
+
+if not result.get("ok") and not result.get("repeat"):
+    ...  # non-recoverable error
+if result.get("repeat"):
+    ...  # re-ask
+```
+
+Notice what the controller *cannot* do: it can't accidentally reveal the answer, double-count a letter, or desynchronize `remaining_spaces` from `unknown_word`, because it has no access path to do those things. All state transitions are **centralized** — which the study guide calls "State Management" in section 3.
+
+### Defensive copies — a subtle but important technique
+
+```python
+def get_visible_word(self) -> List[str]:        # game.py:256-257
+    return list(self.unknown_word)
+
+def get_remaining_letters(self) -> set:         # game.py:264-265
+    return set(self.remaining_letters)
+```
+
+These return **copies**, not the live objects. If they returned the real list/set, the view could do `game.get_visible_word()[0] = "X"` and corrupt game state without ever calling a method. Copying on read closes that leak. This is information hiding in its strictest form: you get *information*, not a *handle*.
+
+(Contrast with `get_player()` at game.py:259-262, which deliberately returns the real `Player` object — but that's fine because `Player` itself enforces its own invariants through its methods.)
+
+### The `_` convention in action
+
+```python
+def _normalize(self, text: str) -> str:   # game.py:34
+```
+
+The leading underscore says: "this is an implementation detail. Outside code (including the controller) should not call it." It *can* call it (Python won't stop it), but the name signals it's not part of the public contract. `WordRepository` uses this heavily: `_load`, `_add_if_valid`, `_validate_normalize`, `_normalize_for_internal` are all private; only `get_by_difficulty()` and `reset_session()` are public (word_repository.py:146, 170).
+
+---
+
+## Example 3: `WordRepository` — hiding complexity, not just data
+
+Encapsulation isn't only about protecting data; it's also about **hiding how something is done**. `WordRepository` (word_repository.py) internally does:
+
+- resolving a `Path` (line 24)
+- checking file existence (line 44)
+- parsing JSON with error translation (lines 47-51)
+- accepting two different file formats (lines 53-56)
+- validating every entry: type, length ≤ 120, allowed characters, ≥ 2 letters (lines 84-117)
+- unicode normalization to a canonical form (lines 122-141)
+- session-level no-repeat bookkeeping via `used_words` (lines 159-167)
+
+But its **entire public interface is two methods**:
+
+```python
+selected = self.word_repo.get_by_difficulty(difficulty)   # controller line 93
+self.word_repo.reset_session()                            # controller line 383
+```
+
+The controller never imports `json`, never opens the file, never knows words are stored in `normalized_words_by_diff`. If you later swapped the JSON file for a SQLite database or a web API, **only the repository internals would change** — the controller code above stays identical. That's information hiding enabling the Repository pattern (section 3 of the guide).
+
+---
+
+## The boundary in the MVC structure
+
+You can see encapsulation expressed architecturally:
+
+| Component | May read | May modify |
+|---|---|---|
+| `Game` (model) | its own state, `Player` objects | everything — but only through its own methods |
+| `GameController` | status dicts, `get_visible_word()`, `is_game_over()` | nothing in the model directly |
+| `ConsoleView` (view) | data passed to it as arguments | nothing at all — it just prints |
+
+The controller is the only component that *calls* model methods; the view never calls any. Each layer depends on the next one's **public interface only** — that's the "low coupling" the guide mentions in 2.4.
+
+---
+
+## Honest caveats (worth knowing as a beginner)
+
+1. **Python privacy is a promise, not an enforcement.** `player.health = 0` is perfectly valid Python from anywhere. You'll even see it in *your tests*, e.g. `test_player.py:100` (`player.health = initial_health`) and `test_game.py:105` — tests commonly set state directly to create a starting condition, then exercise one method. That's an accepted practice: tests are inside the "trusted" boundary.
+2. **`Game` itself reaches into `Player`** in one place — `reset_for_new_round()` does `p.health = p.max_health` (game.py:93) instead of a `player.reset()` method. It works, but the "cleaner" design would add a method to `Player`. A good exercise for you: add `def restore_health(self)` to `Player` and use it there, so *no* health mutation exists outside the `Player` class.
+3. The real enforcement tools in Python, if you ever need them: **`@property`** (custom get/set logic with validation) and `__name` mangling. For most application code — like this project — the `_` convention plus discipline is the idiomatic choice.
+
+---
+
+## Summary
+
+| Concept | Where to see it |
+|---|---|
+| Methods wrapping state changes | `Player.lose_health()` / `is_alive()` — player.py:13-19 |
+| Invariant protection | `max(0, ...)` clamp; letter consumed exactly once |
+| Centralized rules | `Game.guess_letter()` — all 8 steps in one method, game.py:127 |
+| Structured results instead of state poking | status dicts (`ok`, `repeat`, `correct`, `eliminated`, `game_won`…) |
+| Defensive copies | `get_visible_word()`, `get_remaining_letters()` — game.py:256-265 |
+| `_` internal convention | `_normalize`, `_load`, `_validate_normalize` |
+| Hiding complexity | `WordRepository`'s 2-method public API over ~150 lines of machinery |
+
+The one-sentence version: **callers interact with *what a class does*, never with *what a class contains*.**
