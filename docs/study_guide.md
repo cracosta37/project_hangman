@@ -20,6 +20,11 @@ The structural foundation of the project, focusing on how components interact an
 *   **Program to Interfaces, Not Implementations:**
     *   Defining the abstract `View` base class interface with standard methods like `display`, `prompt`, and `show_word`.
     *   The controller is typed against the base interface, meaning any concrete class (e.g., `ConsoleView`, `PygameView`, `TkinterView`) can be substituted transparently as long as it adheres to the contract.
+*   **Duck Typing vs. ABC (Two Ways to Enforce a Contract):**
+    *   The `View` base class is a *promise* that any accepted view provides the 8 contract methods, but Python enforces nothing by default — the language only documents the contract. There are two valid ways to back that promise up.
+    *   **Option A — Duck Typing + `NotImplementedError` (this project's choice):** the base class defines all 8 methods, each with a body that `raise NotImplementedError`. Thanks to duck typing, any object with those 8 methods works as a view *even if it never inherits from `View`*. A view that forgets to override a method only crashes at the exact moment that method is first **called** — a late failure.
+    *   **Option B — ABC (Abstract Base Class):** inherit from `abc.ABC` and mark each method `@abc.abstractmethod`. Now the language itself enforces the contract, so an incomplete view fails **at construction** with a `TypeError` — an early, fail-fast failure.
+    *   The project deliberately picks the looser Option A. The test `test_view_is_instantiable` (which asserts that `View()` can be instantiated) freezes that decision: if someone later "fixes" `View` into a true ABC, this test immediately fails, forcing the design change to be made on purpose and visibly.
 
 ---
 
