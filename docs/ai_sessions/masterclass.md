@@ -1336,3 +1336,269 @@ The controller is the only component that *calls* model methods; the view never 
 | Hiding complexity | `WordRepository`'s 2-method public API over ~150 lines of machinery |
 
 The one-sentence version: **callers interact with *what a class does*, never with *what a class contains*.**
+
+---
+---
+
+# Topic 2.2 — Abstraction
+
+**Abstraction** means exposing *only what a component does* while hiding *how it does it*. Callers work with a simple, stable interface; the complex internals can change without touching the callers.
+
+In Python there are **two related uses of the word**, and this codebase demonstrates both:
+
+1. **Hiding complexity** — wrapping messy mechanics behind a simple method (e.g. `WordRepository`, `Game`).
+2. **Abstract = "general, not concrete"** — a class that defines a contract but not a behavior (e.g. the `View` base class), versus a *concrete* class that implements it (e.g. `ConsoleView`).
+
+Let's walk through each with real code.
+
+---
+
+## Example 1: `WordRepository` — hiding complexity behind one simple method
+
+This is the flagship example from the study guide. Look at the public API (`hangman/services/word_repository.py:146`):
+
+```python
+def get_by_difficulty(self, difficulty: str) -> str:
+    """
+    Return a random unused word for the given difficulty key ("EASY","MEDIUM","HARD").
+    Raises ValueError if difficulty is invalid or no words are available.
+    """
+```
+
+That's the **whole interface the rest of the program needs**: give it a difficulty, get a word back. But inside that class, all this complexity is hidden:
+
+| Hidden inside `WordRepository` | Where |
+|---|---|
+| File existence check + `FileNotFoundError` | `_load()` line 44 |
+| File reading + JSON parsing + `ValueError` on bad JSON | `_load()` lines 47–51 |
+| Accepting two different JSON formats (dict or list) | `_load_from_dict` / `_load_from_list`, lines 65–82 |
+| Per-word validation (type, empty, >120 chars, allowed characters, min 2 letters) | `_validate_normalize()` lines 84–117 |
+| Unicode normalization (NFD decomposition, accent stripping, uppercasing, space collapsing) | `_normalize_for_internal()` lines 122–141 |
+| Session-level no-repeat bookkeeping (`used_words` set) | `get_by_difficulty()` lines 159–167 |
+| Random selection with a deterministic tie-break (`sorted`) | line 165 |
+
+Notice the class docstring (`word_repository.py:11–18`) states the **guarantees of the abstraction** — this is the *contract*:
+
+```python
+"""
+Loads, validates, normalizes, and serves words/phrases.
+
+Guarantees:
+- All stored words satisfy Game.set_word() constraints
+- All internal storage is normalized
+- No-repeat enforced at session level
+"""
+```
+
+### The payoff: the caller is trivially simple
+
+In `hangman/controller/game_controller.py:91–97` the controller just does:
+
+```python
+while True:
+    try:
+        selected = self.word_repo.get_by_difficulty(difficulty)
+    except ValueError as e:
+        self.view.display(str(e) + "\n")
+        difficulty = self.choose_difficulty()
+        continue
+```
+
+The controller has **no idea** (and doesn't need to know) that words come from a JSON file, that accents are stripped, that duplicates are filtered, or that used words are remembered. It only knows:
+- input: a difficulty string
+- output: a word
+- failure: a `ValueError`
+
+**Why this matters:** if tomorrow the word bank moves from a JSON file to a SQLite database or a web API, you rewrite the *inside* of `WordRepository` and the controller doesn't change one line. That's the abstraction paying off.
+
+### Abstraction vs. encapsulation, side by side
+
+These two concepts are often confused; `WordRepository` shows the difference clearly:
+
+- **Abstraction** = the *design-level* "what": `get_by_difficulty(difficulty) -> str`. The shape of the interface.
+- **Encapsulation** = the *implementation-level* "how it's protected": the `_load`, `_validate_normalize`, `_normalize_for_internal` methods and the `used_words` / `normalized_words_by_diff` attributes use the leading-underscore convention (lines 26–28), signaling "internal detail, don't touch."
+
+Abstraction decides *what to hide*; encapsulation is the *mechanism* that hides it.
+
+---
+
+## Example 2: the `View` base class — an *abstract* contract
+
+Now the second meaning. `hangman/view/view_interface.py` defines a class that describes **what every view must be able to do**, without doing anything itself:
+
+```python
+class View:
+    """Abstract interface for user interaction."""
+
+    def display(self, message: str) -> None:
+        raise NotImplementedError
+
+    def show_title(self) -> None:
+        raise NotImplementedError
+
+    def prompt(self, message: str) -> str:
+        raise NotImplementedError
+
+    def prompt_hidden(self, message: str) -> str:
+        raise NotImplementedError
+
+    def pause(self, message: str = "Press Enter to continue...") -> None:
+        raise NotImplementedError
+
+    def clear(self) -> None:
+        raise NotImplementedError
+
+    def show_word(self, word_state: List[str]) -> None:
+        raise NotImplementedError
+
+    def show_health(self, player) -> None:
+        raise NotImplementedError
+```
+
+That's **8 methods = the contract**: "any view I accept must be able to display a message, prompt for input, show the word state, show a player's health, and so on."
+
+The **concrete** implementation is `ConsoleView` (`hangman/view/console_view.py:8`), which inherits from `View` and actually implements each method:
+
+```python
+class ConsoleView(View):
+    """Handles all console-based input and output operations."""
+
+    def display(self, message: str) -> None:
+        print(message)
+
+    def show_word(self, word_state: List[str]) -> None:
+        print(f"    {' '.join(word_state)}\n")
+
+    def show_health(self, player) -> None:
+        print(player.hangman_states[player.health])
+        print()
+```
+
+Because `GameController` only ever talks to `self.view` through those 8 methods (e.g. `self.view.show_word(self.game.get_visible_word())` at `game_controller.py:163`), you could write a `PygameView` or `TkinterView` class that implements the same 8 methods, swap it in, and the controller would work unchanged.
+
+### Two ways to enforce the contract (Option A vs Option B)
+
+The study guide highlights a deliberate design choice here:
+
+**Option A — Duck typing + `NotImplementedError` (this project's choice).** `View` is a *regular* class, so nothing is enforced by the language — it's a documented promise. Any object with those 8 methods works, even without inheriting from `View` ("if it quacks like a duck..."). The failure mode is **late**: a subclass that forgets to override `show_word` runs fine until someone actually *calls* `show_word`, at which point it raises `NotImplementedError`.
+
+**Option B — ABC (Abstract Base Class).** You'd write:
+
+```python
+import abc
+
+class View(abc.ABC):
+    @abc.abstractmethod
+    def display(self, message: str) -> None: ...
+```
+
+Now the *language* enforces the contract: creating an incomplete subclass fails **at construction** with a `TypeError`. This is **early / fail-fast** failure.
+
+### The test that freezes the decision
+
+`tests/unit/test_view_interface.py` guards this design with two kinds of tests:
+
+1. `test_all_methods_raise_not_implemented` (line 36) — parametrized over all 8 methods, proves each one in the base class really does `raise NotImplementedError`, so the "late failure" behavior is intentional and tested:
+
+```python
+@pytest.mark.parametrize("method_name, args", [
+    ("display", ("Hello",)),
+    ("prompt", ("Enter something:",)),
+    ...
+])
+def test_all_methods_raise_not_implemented(view_instance, method_name, args):
+    method = getattr(view_instance, method_name)
+    with pytest.raises(NotImplementedError):
+        method(*args)
+```
+
+2. `test_view_is_instantiable` (line 163) — asserts that `View()` **can** be instantiated:
+
+```python
+def test_view_is_instantiable():
+    """The interface can currently be instantiated (non-ABC design)."""
+    view = View()
+    assert isinstance(view, View)
+```
+
+This test is a **design tripwire**: if someone later "fixes" `View` into a true ABC (Option B), `View()` would raise `TypeError` and this test would fail immediately, forcing the design change to be made on purpose and visibly — instead of silently changing failure timing for everyone.
+
+---
+
+## Example 3: `Game` — behavior-level abstraction of game rules
+
+The third example is subtler. `Game` (`hangman/model/game.py:8`) is a "pure game model: contains all rules and state but performs no I/O." The abstraction here is **behavioral**: the controller never implements game rules itself. It calls one method and reads a structured result.
+
+Look at `guess_letter` (`game.py:127`). All the hard logic is *inside*: input validation, normalizing the letter (stripping accents), checking repeats, finding all matching positions in the word, decrementing health on a miss, detecting elimination, and detecting a win. It hands back a **status dictionary**:
+
+```python
+return {
+    "ok": True,
+    "repeat": False,
+    "correct": True,
+    "positions": positions,
+    "times": times,
+    "eliminated": False,
+    "player_health": player.health,
+    "game_won": game_won,
+    "game_over": self.remaining_players <= 0,
+    "winner": winner
+}
+```
+
+The controller's job shrinks to *interpreting* that dictionary (`game_controller.py:240–256`):
+
+```python
+while True:
+    raw_letter = self.view.prompt("Please insert a letter: ")
+    result = self.game.guess_letter(player_index, raw_letter)
+
+    # Non-recoverable error → exit handler
+    if not result.get("ok") and not result.get("repeat"):
+        self.view.display(result.get("error", "Invalid operation.") + "\n")
+        self.view.pause()
+        return result
+
+    # Recoverable error → retry input
+    if result.get("repeat"):
+        self.view.display(result.get("error", "Invalid input.") + "\n")
+        continue
+
+    # Valid input
+    break
+```
+
+Notice the **abstraction boundary in action**:
+
+- The controller does **not** know how a guess is normalized, how positions are found, or when the game is won — it just reads `result["correct"]`, `result["game_won"]`, `result["winner"]`.
+- It does **not** modify game state directly. It never writes to `game.word`, `game.unknown_word`, or a player's `health`. All state changes happen *inside* model methods (`guess_letter`, `set_word`, `create_players`), which also return status dicts like `{"ok": False, "error": "..."}` so the controller can display errors without knowing which rule was broken.
+- Even the "is the game over?" check is abstracted: the controller calls `self.game.is_game_over()` (`game.py:253`) instead of re-deriving the win/loss condition itself.
+
+**Why this matters:** the entire rule set is testable in isolation with zero I/O (that's exactly what `tests/unit/test_game.py` does), and if the rules change — say, health is restored between rounds, or repeated letters no longer count — only `Game` changes.
+
+---
+
+## How abstraction pays off in the tests (tying it together)
+
+Because the controller depends on the *abstract* `View` contract rather than on real console I/O, `tests/unit/test_game_controller.py:14` can do:
+
+```python
+view = Mock()
+...
+controller = GameController(view=view, constants_module=Mock())
+```
+
+A `Mock()` object "implements" any contract automatically — every method returns a controllable fake value. So a full game round can be simulated without a terminal. This only works *because* the code was written against the abstraction (the 8-method contract), not against `ConsoleView` specifically.
+
+---
+
+## Summary
+
+| Abstraction | Hidden complexity | Simple interface exposed |
+|---|---|---|
+| `WordRepository` | file I/O, JSON parsing, validation, unicode cleanup, no-repeat state | `get_by_difficulty(difficulty) -> str` |
+| `View` (abstract) | which UI technology, how text is rendered, how input is read | 8 contract methods (`display`, `prompt`, `show_word`, ...) |
+| `ConsoleView` (concrete) | platform details (`cls` vs `clear`, `getpass`, Ctrl+C handling) | the same 8 methods, actually implemented |
+| `Game` | normalization, letter matching, health/elimination, win detection | `guess_letter(...) -> status dict` |
+
+The through-line: **every caller in this codebase only ever sees a small, stable interface**, and all the fiddly mechanics (files, unicode, I/O, rules) are locked behind it. That is what makes the project testable, swappable (JSON → database, console → GUI), and maintainable.
