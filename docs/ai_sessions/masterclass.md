@@ -1602,3 +1602,161 @@ A `Mock()` object "implements" any contract automatically — every method retur
 | `Game` | normalization, letter matching, health/elimination, win detection | `guess_letter(...) -> status dict` |
 
 The through-line: **every caller in this codebase only ever sees a small, stable interface**, and all the fiddly mechanics (files, unicode, I/O, rules) are locked behind it. That is what makes the project testable, swappable (JSON → database, console → GUI), and maintainable.
+
+---
+---
+
+# 2.3 — Single Responsibility Principle (SRP)
+
+## The principle in one sentence
+
+**A class should have only *one reason to change*.** In practice: each class owns exactly one job (one "responsibility"), and everything in that class serves that job. If you can name two unrelated reasons why you'd edit a class, it probably has two responsibilities and should be split.
+
+Your study guide (`docs/study_guide.md:39-43`) states the project's version of SRP directly:
+
+> - `Player` maintains identity and health.
+> - `Game` maintains multi-player states and applies round-based game rules.
+> - `WordRepository` manages the loading, validation, and history of game words.
+
+Let's see each one in the code.
+
+---
+
+## Responsibility 1: `Player` — identity and health only
+
+`hangman/model/player.py` is only 19 lines. Its entire job: *know who it is and how much health it has left.*
+
+```python
+class Player:
+    """Represents a player in the Hangman game."""
+
+    def __init__(self, name: str, max_health: int, hangman_states: List[str]):
+        self.name: str = name
+        self.max_health: int = max_health
+        self.health: int = max_health
+        self.hangman_states: List[str] = hangman_states
+
+    def lose_health(self) -> bool:
+        previous = self.health
+        self.health = max(0, self.health - 1)
+        return previous > 0 and self.health == 0
+
+    def is_alive(self) -> bool:
+        return self.health > 0
+```
+
+- **Its single reason to change:** anything about how a player's *health/identity* works — e.g., "health decreases by 2 instead of 1", or "players get a shield". You'd edit only `player.py`.
+- **What it deliberately does NOT do:**
+  - It never prints anything. Notice `hangman_states` is just *stored data* here; the actual drawing happens in the View — `ConsoleView.show_health` prints it (`hangman/view/console_view.py:52-54`).
+  - It never guesses letters, never checks if the word is complete, never touches files.
+  - It even hides its internal state behind methods: you call `lose_health()` / `is_alive()` instead of reading `player.health` directly (that's the Encapsulation item in the same section of the guide working hand-in-hand with SRP).
+
+**Counter-example (SRP violation):** imagine `Player` also had a `print_my_health()` method with a `print()` inside. Then you'd have *two* reasons to change it: health rules, and display format. Later, when you move from console to a GUI, you'd have to hunt through the model to find the printing code. This project avoids that by keeping `Player` I/O-free.
+
+---
+
+## Responsibility 2: `Game` — the rules and round state only
+
+`hangman/model/game.py:8-9` is self-documenting about its single job:
+
+```python
+class Game:
+    """Pure game model: contains all rules and state but performs no I/O."""
+```
+
+Its one responsibility: *apply the rules of a hangman round and track whose turn it is / what remains.*
+
+```python
+def guess_letter(self, player_index: int, raw_letter: str) -> Dict[str, Any]:
+    ...
+    if letter not in self.remaining_letters:
+        return {..., "repeat": True, "error": f"The letter '{raw_letter}' was already used."}
+    self.remaining_letters.remove(letter)
+    positions = [i for i, l in enumerate(self.word) if l == letter]
+    ...
+    if times == 0:
+        eliminated = player.lose_health()
+        ...
+```
+
+Everything in this class serves the "game rules" job:
+
+| Method | Serves the rule of... |
+|---|---|
+| `set_word` (`game.py:46`) | what a valid secret word is |
+| `guess_letter` / `guess_word` | how a guess affects health, spaces, elimination |
+| `reset_for_new_round` (`game.py:72`) | what carries over between rounds |
+| `is_game_over`, `get_visible_word` | exposing round state for others to read |
+
+Key SRP observations:
+
+1. **No I/O.** The docstring "performs no I/O" is a deliberate contract. `Game` never calls `print` or `input` — all of that is the View's job. So if you later build a `PygameView` or `TkinterView` (as the guide's *Program to Interfaces* item mentions), `game.py` doesn't change at all.
+2. **It delegates instead of absorbing other classes' jobs.** When a guess is wrong, `Game` calls `player.lose_health()` (`game.py:160`) rather than doing `player.health -= 1` itself. The *mechanics of health* remain `Player`'s responsibility; `Game` only uses the result. (One small nuance: `reset_for_new_round` sets `p.health = p.max_health` directly at `game.py:93` — a minor shortcut you could later move into a `Player.reset()` method to keep the principle strict.)
+3. **It returns status dictionaries instead of printing messages.** See the `{"ok": ..., "error": ...}` results. `Game` *decides* "that letter was repeated"; the *displaying* of the error message is the Controller/View's job. That's how one class keeps one reason to change.
+
+**Counter-example:** if `Game.guess_letter` contained `print("Wrong letter!")` and `input("Try again: ")`, then a change in console formatting or a move to a GUI would force edits in the rules engine — and you couldn't unit-test the rules without a terminal.
+
+---
+
+## Responsibility 3: `WordRepository` — word data management only
+
+`hangman/services/word_repository.py:10-18` announces its job in the docstring:
+
+```python
+class WordRepository:
+    """
+    Loads, validates, normalizes, and serves words/phrases.
+
+    Guarantees:
+    - All stored words satisfy Game.set_word() constraints
+    - All internal storage is normalized
+    - No-repeat enforced at session level
+    """
+```
+
+Its single responsibility: *be the gatekeeper of word data* — reading the JSON file, rejecting bad entries, normalizing unicode, and serving one unused word per call.
+
+```python
+def get_by_difficulty(self, difficulty: str) -> str:
+    ...
+    available = self.normalized_words_by_diff[key] - self.used_words
+    if not available:
+        raise ValueError(f"No unused words remaining for difficulty: {key}")
+    selection = random.choice(tuple(sorted(available)))
+    self.used_words.add(selection)
+    return selection
+```
+
+Note the beautiful boundary in that method: `WordRepository` **knows nothing about the game** — it doesn't ask who the players are, doesn't check health, doesn't print. It just hands back a clean word and tracks the "history" (the `used_words` set) so a word is never repeated in a session. And conversely, `Game.set_word` (`game.py:46`) **knows nothing about files** — it only validates that a word is usable in a round. The two responsibilities stay on separate sides of the wall.
+
+- **Its single reason to change:** anything about *where words come from or how they're cleaned* — e.g., switching from a JSON file to a database or a web API. The rest of the app only ever calls `get_by_difficulty(...)`, so it never changes (this is exactly why the guide lists it under both SRP and the Repository pattern).
+- **What it does NOT do:** no printing, no game rules, no player logic. Its only "talk" with the outside is method arguments, return values, and raised exceptions (`FileNotFoundError`, `ValueError`).
+
+**Counter-example:** if `WordRepository` also decided *how many lives a player gets* (mixing game rules into data storage) or if `Game` opened the JSON file itself (mixing file I/O into rules), you'd have classes with two reasons to change — and every new difficulty system or new word source would ripple through the code.
+
+---
+
+## How SRP pays off in this project
+
+1. **MVC falls out naturally.** SRP is the micro-level version of Separation of Concerns:
+   - Model = `Player` + `Game` (rules and state, zero I/O)
+   - View = `ConsoleView` (`console_view.py:8-9`: "Handles all console-based input and output operations")
+   - Controller = `GameController` (`game_controller.py:10-14`: "orchestrates the interaction... All I/O is performed via the View")
+2. **Each class gets its own clean test file** — `test_player.py`, `test_game.py`, `test_word_repository.py`, `test_console_view.py`, `test_game_controller.py`. Because `Player` has no I/O, `test_player.py` can test health logic in microseconds with no terminal involved. That's a direct benefit of SRP.
+3. **Change isolation (the practical test of SRP).** Ask for each change "which files would I touch?":
+   - New hangman drawing → `constants.py` + `ConsoleView` only.
+   - Players get 5 lives instead of 6 → `constants.py` (`MAX_HEALTH`) only.
+   - Words come from an API → `WordRepository` only.
+   - Add a "double-elimination" rule → `Game` only.
+   
+   Each change has exactly one home — that's SRP working.
+
+## A quick heuristic for you as a beginner
+
+When writing (or reviewing) a class, run this check:
+
+1. Can you state its responsibility in **one sentence**? (`Player`: "tracks a player's name and health.")
+2. Does every method in the class **serve that sentence**? (If you find a `print()` in `Game` or a `json.load` in `Player`, you've found a second responsibility.)
+3. Does it **talk to other classes only through their public methods**, never by reaching into their internals? (The one exception in this codebase is `game.py:93`, `p.health = p.max_health` — a small pragmatic shortcut, worth knowing about so you can decide for yourself when strictness is worth it.)
+
+If you can pass all three, your class follows SRP — and so does every class in this Hangman codebase.
