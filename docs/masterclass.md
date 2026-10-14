@@ -1,6 +1,8 @@
-# Topic 1.1 — The MVC Pattern (Model‑View‑Controller)
+# 1. Software Architecture & Paradigms
 
-## What MVC is (the big idea)
+## Topic 1.1 — The MVC Pattern (Model‑View‑Controller)
+
+### What MVC is (the big idea)
 
 MVC is a way to **split an application into three roles** so each part has *one job* and they only talk to each other through narrow, well‑defined channels:
 
@@ -21,7 +23,7 @@ Your project is a textbook example of this. Let's map each role to real files.
 
 ---
 
-## The three roles in your codebase
+### The three roles in your codebase
 
 ```
 run.py  (wiring / composition root)
@@ -33,7 +35,7 @@ GameController  ──talks to──►  Game  (Model)
    └──talks to──►  ConsoleView  (View)
 ```
 
-### 1. MODEL — `Game` and `Player`
+#### 1. MODEL — `Game` and `Player`
 
 The Model is everything in `hangman/model/`. Its job: **pure logic and state, zero I/O.**
 
@@ -98,7 +100,7 @@ def guess_letter(self, player_index: int, raw_letter: str) -> Dict[str, Any]:
 
 > **Check for yourself (great exercise):** open `hangman/model/game.py` and search for `print(` or `input(`. You'll find **none**. The Model genuinely performs no I/O.
 
-### 2. VIEW — `ConsoleView` (+ the `View` interface)
+#### 2. VIEW — `ConsoleView` (+ the `View` interface)
 
 The View is `hangman/view/`. Its job: **only display and only collect input — it's "dumb."**
 
@@ -147,7 +149,7 @@ Look closely: **none of these methods contain game logic.** `show_health` doesn'
 
 > Because it's built on the `View` interface, you could tomorrow write a `TkinterView` or `PygameView` (a GUI) that implements the same methods, and the rest of the app wouldn't change. That's the payoff of the interface.
 
-### 3. CONTROLLER — `GameController`
+#### 3. CONTROLLER — `GameController`
 
 The Controller is `hangman/controller/game_controller.py:10`. Its job: **orchestrate** — receive input, delegate rules to the Model, decide what the View shows next.
 
@@ -201,7 +203,7 @@ The Controller never guesses letters itself and never computes health — it onl
 
 ---
 
-## How it all gets wired together — `run.py` (Dependency Injection)
+### How it all gets wired together — `run.py` (Dependency Injection)
 
 The final piece is the **composition root**, `run.py`:
 
@@ -231,7 +233,7 @@ Because of MVC + DI, the test can assert *what the controller made the view disp
 
 ---
 
-## The full data flow, one guess at a time
+### The full data flow, one guess at a time
 
 ```
   USER (keyboard)
@@ -259,7 +261,7 @@ Each arrow crosses a **role boundary**, and each role only does its own job.
 
 ---
 
-## Why MVC matters here (the "so what?")
+### Why MVC matters here (the "so what?")
 
 - **Change the UI without touching logic.** Swap `ConsoleView` for a GUI implementing `View`; `Game`, `Player`, and `GameController` are untouched.
 - **Change the rules without touching UI.** Alter health/elimination logic in `Game`; the Controller and View don't care.
@@ -268,7 +270,7 @@ Each arrow crosses a **role boundary**, and each role only does its own job.
 
 ---
 
-## Quick self‑check (try these to lock it in)
+### Quick self‑check (try these to lock it in)
 
 1. In `hangman/model/game.py`, find a method that returns a status dict (e.g., `set_word`, `game.py:46`) and list every key it returns. Notice none of them are "print" instructions.
 2. In `hangman/view/console_view.py`, find a method that does *only* I/O (`display`, `game_controller` line 18) and confirm it contains no `if` about game rules.
@@ -280,9 +282,9 @@ Each arrow crosses a **role boundary**, and each role only does its own job.
 ---
 ---
 
-# Topic 1.2 — Separation of Concerns (SoC)
+## Topic 1.2 — Separation of Concerns (SoC)
 
-## What SoC is (the big idea)
+### What SoC is (the big idea)
 
 **Separation of Concerns** is the principle that each part of a program should be responsible for **exactly one "concern"** — and a *concern* is best defined as **one reason the code might change**.
 
@@ -290,7 +292,7 @@ Each arrow crosses a **role boundary**, and each role only does its own job.
 
 This is the **principle** that *motivates* MVC (topic 1.1). MVC tells you *how* to split by interaction role (Model/View/Controller). SoC tells you *why* that split is good, and it goes **one step further** — it also explains why your project pulled *word loading* and *configuration* into their own modules.
 
-### Concern vs. Coupling (two words to keep straight)
+#### Concern vs. Coupling (two words to keep straight)
 
 - **Concern** = a category of responsibility (a "reason to change").
 - **Coupling** = how much one piece *depends on / knows about* another.
@@ -299,7 +301,7 @@ SoC's goal: **many clean concerns, low coupling between them.** High cohesion *i
 
 ---
 
-## The concerns in your project
+### The concerns in your project
 
 Your codebase is physically organized **one folder per concern**. That directory layout is the single strongest evidence of SoC:
 
@@ -326,7 +328,7 @@ So the full set of concerns — note that **two of them (data access, configurat
 
 ---
 
-## The flagship example: `WordRepository` isolates the data concern
+### The flagship example: `WordRepository` isolates the data concern
 
 MVC (topic 1.1) never mentions the word bank — but SoC demands its own home. Look at how the **Controller** uses the repository:
 
@@ -356,7 +358,7 @@ All of that is *hidden inside* `WordRepository`. Let's see what that "one method
 
 The user of the class (the controller) sees a clean, narrow door: *"give me a random unused word for this difficulty."* Everything messy is behind that door. **That is SoC in action — one concern, one owner, one narrow interface.**
 
-### The payoff: change the source, touch *one* file
+#### The payoff: change the source, touch *one* file
 
 Suppose you later decide the word bank should come from a **SQLite database** instead of a JSON file. Because of SoC:
 
@@ -367,7 +369,7 @@ Compare that to the study guide's point: *"UI modifications (e.g., migrating fro
 
 ---
 
-## Contrast: what the code looks like *without* SoC
+### Contrast: what the code looks like *without* SoC
 
 Imagine the same game as one tangled function (the anti-pattern every beginner writes first):
 
@@ -392,7 +394,7 @@ Your project's answer: **six separate modules**, each with one job, communicatin
 
 ---
 
-## A subtle (but important) nuance: validation appears in two places
+### A subtle (but important) nuance: validation appears in two places
 
 You might notice word validation exists in **two** classes:
 
@@ -408,7 +410,7 @@ The rule of thumb: **each concern owns the validation of the data it is responsi
 
 ---
 
-## SoC vs. MVC — how they fit together
+### SoC vs. MVC — how they fit together
 
 | | **MVC (1.1)** | **SoC (1.2)** |
 |---|---------------|--------------|
@@ -421,7 +423,7 @@ Think of it this way: **MVC is SoC applied to the user-interaction triangle.** Y
 
 ---
 
-## Why SoC matters here (the "so what?")
+### Why SoC matters here (the "so what?")
 
 - **Change isolation.** Change the word source → only `services/`. Change the rules → only `model/`. Change the UI → only `view/`.
 - **Independent testing.** Each concern has its own test file (`test_game.py`, `test_word_repository.py`, `test_console_view.py`, `test_game_controller.py`) — possible *because* the concerns are decoupled.
@@ -430,7 +432,7 @@ Think of it this way: **MVC is SoC applied to the user-interaction triangle.** Y
 
 ---
 
-## Quick self‑check (try these to lock it in)
+### Quick self‑check (try these to lock it in)
 
 1. In `hangman/controller/game_controller.py`, find **every** place the controller touches the word bank. Confirm it's *always* through `self.word_repo.get_by_difficulty(...)` / `reset_session()` — never `json` or `open()`.
 2. Open `hangman/model/game.py` and confirm it contains **no** file/JSON code. The Model knows nothing about *where* words come from.
@@ -442,9 +444,9 @@ Think of it this way: **MVC is SoC applied to the user-interaction triangle.** Y
 ---
 ---
 
-# Topic 1.3 — Dependency Injection (DI)
+## Topic 1.3 — Dependency Injection (DI)
 
-## 1. What is Dependency Injection?
+### 1. What is Dependency Injection?
 
 **Dependency Injection** is a technique where an object does **not** create the other objects it needs (its *dependencies*) internally. Instead, those dependencies are **passed in from outside** — usually through the constructor.
 
@@ -463,9 +465,9 @@ The most common form is **constructor injection**, which is exactly what this co
 
 ---
 
-## 2. The main example: the View injected into `GameController`
+### 2. The main example: the View injected into `GameController`
 
-### 2.1 The dependency the controller needs
+#### 2.1 The dependency the controller needs
 
 The controller's entire job is to orchestrate I/O: show the board, ask for a guess, print errors. It needs a *view* object, but it does **not** decide what kind of view. Look at its constructor:
 
@@ -485,7 +487,7 @@ self.view.show_health(player)
 self.view.show_word(self.game.get_visible_word())
 ```
 
-### 2.2 The contract: the `View` interface
+#### 2.2 The contract: the `View` interface
 
 The controller relies on a *contract*, defined in `hangman/view/view_interface.py:4`:
 
@@ -509,7 +511,7 @@ class View:
 > ```
 > That makes the "program to an interface, not to an implementation" rule visible in the type hints.
 
-### 2.3 Where the injection happens: the composition root
+#### 2.3 Where the injection happens: the composition root
 
 Someone still has to create the `ConsoleView` and hand it over. That "wiring" code lives in the **composition root** — the entry point of the application, `run.py:6-9`:
 
@@ -524,7 +526,7 @@ The **composition root** is the single place that knows the concrete classes and
 
 ---
 
-## 3. A second example: the `constants` module injected
+### 3. A second example: the `constants` module injected
 
 DI isn't only for objects — this project also injects a **module** (a bag of configuration values) as a dependency.
 
@@ -556,11 +558,11 @@ The benefits here (matching the study guide's "Configuration Externalization"):
 
 ---
 
-## 4. The payoff: testing without a real terminal
+### 4. The payoff: testing without a real terminal
 
 This is the whole *reason* DI exists, and the codebase proves it in `tests/unit/test_game_controller.py`.
 
-### 4.1 Injecting a fake view
+#### 4.1 Injecting a fake view
 
 The `controller_factory` fixture (test_game_controller.py:66-75) builds a controller with a **`Mock` instead of a real view**:
 
@@ -578,7 +580,7 @@ def controller_factory(view_factory, game_factory, word_repo_factory):
 
 The `view_factory` fixture (lines 11-27) just creates `view = Mock()` and gives its methods harmless default return values. Because of DI, this "drop-in fake" satisfies the controller completely — the controller doesn't know or care that it isn't a `ConsoleView`.
 
-### 4.2 Simulating a whole game session
+#### 4.2 Simulating a whole game session
 
 With the real `ConsoleView`, testing the controller would require a human typing at a terminal. With the injected mock, the test **scripts the user's keystrokes** using `side_effect`:
 
@@ -595,7 +597,7 @@ assert mock_game.set_word.call_count == 2
 
 Read this like a story: the simulated user answers `"Y"` (enable normalization), `"1"` (manual word source), `"1"` (one player), `"Alice"` (name); the hidden prompt first returns `"bad"` (rejected by the model → retry) then `"good"` (accepted). The test then asserts the model received `set_word` **twice**. No terminal, no keyboard, instant and repeatable.
 
-### 4.3 Checking the exact output sequence
+#### 4.3 Checking the exact output sequence
 
 Because `view` is a mock, every call the controller makes is **recorded**, so tests can verify what the player would have seen:
 
@@ -617,7 +619,7 @@ This is exactly what the study guide describes: *"allows tests to inject mock ve
 
 ---
 
-## 5. Contrast: what the code would look like **without** DI
+### 5. Contrast: what the code would look like **without** DI
 
 To really see the value, here is the tightly-coupled alternative:
 
@@ -642,7 +644,7 @@ With DI, the controller file contains **zero** `ConsoleView()` instantiations. I
 
 ---
 
-## 6. One more thing to notice: where DI is *not* applied yet
+### 6. One more thing to notice: where DI is *not* applied yet
 
 As a careful reader, compare the two dependencies of the controller:
 
@@ -665,7 +667,7 @@ This is a great self-exercise: apply constructor injection to `word_repo`, updat
 
 ---
 
-## 7. Summary
+### 7. Summary
 
 | Concept | Where you see it in this codebase |
 |---|---|
@@ -680,9 +682,9 @@ The one-sentence takeaway: **DI means "give me what I need, don't make me build 
 
 ---
 
-# Topic 1.4: Program to Interfaces, Not Implementations
+## Topic 1.4: Program to Interfaces, Not Implementations
 
-## 1. The core idea in one sentence
+### 1. The core idea in one sentence
 
 Write your code so it depends on a **contract** ("a view *can* display, prompt, and clear"), never on a **specific machine** that fulfills it ("a *console* view"). The concrete class is a **pluggable detail** chosen at the very last moment, at the edge of the program.
 
@@ -692,7 +694,7 @@ In design-patterns language this is the **Liskov Substitution Principle** plus *
 
 ---
 
-## 2. The three roles in your codebase
+### 2. The three roles in your codebase
 
 Your project is a textbook example. There are exactly three actors:
 
@@ -703,7 +705,7 @@ Your project is a textbook example. There are exactly three actors:
 | **The consumer** | `GameController` | `hangman/controller/game_controller.py` |
 | **The "wiring" (composition root)** | `run()` | `run.py` |
 
-### 2.1 The contract: `View` (`hangman/view/view_interface.py:4`)
+#### 2.1 The contract: `View` (`hangman/view/view_interface.py:4`)
 
 ```python
 class View:
@@ -737,7 +739,7 @@ Read this class and answer one question: **does it say anything about *how*?** N
 
 `raise NotImplementedError` is Python's idiomatic "this method is a promise, not a body" marker. It means: *if you ever call this method on something that forgot to override it, you get a loud, immediate error* — instead of silently doing nothing.
 
-### 2.2 The implementation: `ConsoleView` (`hangman/view/console_view.py:8`)
+#### 2.2 The implementation: `ConsoleView` (`hangman/view/console_view.py:8`)
 
 ```python
 class ConsoleView(View):
@@ -760,7 +762,7 @@ class ConsoleView(View):
 
 This is where all the *how* lives: `print`, `input`, `getpass`, `os.system('cls'/'clear')`, Ctrl+C handling. The inheritance `ConsoleView(View)` is the declaration: **"I guarantee everything the View contract promises, here's my recipe for each promise."**
 
-### 2.3 The consumer: `GameController` (`hangman/controller/game_controller.py`)
+#### 2.3 The consumer: `GameController` (`hangman/controller/game_controller.py`)
 
 Now look at how the controller uses its view. Scan through `setup_game`, `run_game_loop`, `handle_letter_guess`... every single interaction goes through the **contract verbs**:
 
@@ -776,7 +778,7 @@ self.view.pause("Press Enter to continue...")       # game_controller.py:232
 
 Nowhere in the controller does it say `print(...)`, `input(...)`, or `isinstance(self.view, ConsoleView)`. The controller treats `self.view` as a **black box that obeys the 8-verb contract**. It genuinely doesn't know — and doesn't care — whether the box is a terminal, a window, or a fake.
 
-### 2.4 The wiring: `run.py` (the composition root)
+#### 2.4 The wiring: `run.py` (the composition root)
 
 The *only* place in the entire program where the implementation is named:
 
@@ -791,7 +793,7 @@ This is **dependency injection** in action: the controller receives the view thr
 
 ---
 
-## 3. The payoff #1: transparent substitution
+### 3. The payoff #1: transparent substitution
 
 Because the controller only speaks the `View` language, this hypothetical class would be a **drop-in replacement**:
 
@@ -823,11 +825,11 @@ Note what `PygameView` must **not** be tempted to do: invent extra requirements 
 
 ---
 
-## 4. The payoff #2: testability (the big one)
+### 4. The payoff #2: testability (the big one)
 
 This is where the principle pays for itself, and your test suite shows it beautifully.
 
-### 4.1 `tests/unit/test_game_controller.py:11-27`
+#### 4.1 `tests/unit/test_game_controller.py:11-27`
 
 ```python
 @pytest.fixture
@@ -851,7 +853,7 @@ A `Mock` is, effectively, a class that "implements" *any* interface on demand. B
 
 Imagine instead the controller had done `input()`/`print()` directly (the "programming to the implementation" anti-pattern). Testing it would require real stdin/stdout, monkeypatching builtins, and you could never verify "the user saw message A *then* was asked B". The interface is what makes the 700+ line controller testable line by line.
 
-### 4.2 `tests/unit/test_view_interface.py` — policing the contract itself
+#### 4.2 `tests/unit/test_view_interface.py` — policing the contract itself
 
 The second test file is dedicated to the interface. Two highlights:
 
@@ -863,7 +865,7 @@ Together they mean: the contract is treated as a first-class, versioned artifact
 
 ---
 
-## 5. Python-specific notes
+### 5. Python-specific notes
 
 - **Duck typing vs. ABC.** Python doesn't force interfaces. You could have used `abc.ABC` + `@abstractmethod`, which makes `PygameView` *fail at construction* if it forgets one method. This project instead uses the lighter "base class + `raise NotImplementedError`" convention (see `test_view_is_instantiable`, test_view_interface.py:163, which even documents that this is a deliberate "non-ABC design"). Both are valid; the ABC version is stricter, the current version is more Pythonic/loose.
 - **Type hints document the intent.** `prompt(self, message: str) -> str` in the interface is where the contract's *typing* lives; implementations inherit that expectation.
@@ -871,11 +873,11 @@ Together they mean: the contract is treated as a first-class, versioned artifact
 
 ---
 
-## 6. Two real deviations in this codebase (great critical-thinking exercises)
+### 6. Two real deviations in this codebase (great critical-thinking exercises)
 
 A good tutor points at the blemishes, because they're where you learn fastest. There are two places where this project *bends* the very principle it preaches:
 
-### 6.1 The type hint says the wrong class — `game_controller.py:16`
+#### 6.1 The type hint says the wrong class — `game_controller.py:16`
 
 ```python
 def __init__(self, view: ConsoleView, constants_module):
@@ -891,7 +893,7 @@ def __init__(self, view: View, constants_module):
 
 Now the *type system itself* encodes "any View will do" — and if someone passes a `PygameView`, it's honest; if they pass a random object, mypy will complain.
 
-### 6.2 A contract violation the mocks hide — `game_controller.py:412`
+#### 6.2 A contract violation the mocks hide — `game_controller.py:412`
 
 ```python
 choice = self.view.get_choice(["1", "2", "3"])
@@ -906,7 +908,7 @@ The correct fix, following the principle: add `get_choice` (or reuse `prompt` in
 
 ---
 
-## 7. Checklist to verify the principle in any codebase
+### 7. Checklist to verify the principle in any codebase
 
 1. Find the base/abstract class with `NotImplementedError` (or ABC) bodies → that's the **interface**.
 2. Find who *constructs* the concrete class. It should be exactly **one place** at the program's edge (here: `run.py`).
@@ -919,11 +921,11 @@ The correct fix, following the principle: add `get_choice` (or reuse `prompt` in
 ---
 ---
 
-# Topic 1.5 — Duck Typing vs. ABC: Two Ways to Enforce a Contract
+## Topic 1.5 — Duck Typing vs. ABC: Two Ways to Enforce a Contract
 
 *Deep dive into the "Duck typing vs. ABC" note from Topic 1.4 (§5), including the `test_view_is_instantiable` evidence explained line by line.*
 
-## 1. The problem being solved
+### 1. The problem being solved
 
 `GameController` calls 8 methods on `self.view` (`display`, `prompt`, `show_word`, ...). The `View` base class is a *promise*: "anything I accept must have these 8 methods." But in Python that promise is just documentation — **the language enforces nothing** (unlike Java or C#). So the real question is:
 
@@ -931,7 +933,7 @@ The correct fix, following the principle: add `get_choice` (or reuse `prompt` in
 
 There are two valid answers. This project deliberately picks the looser one.
 
-## 2. Option A — what this project does: base class + `raise NotImplementedError`
+### 2. Option A — what this project does: base class + `raise NotImplementedError`
 
 ```python
 # hangman/view/view_interface.py
@@ -948,7 +950,7 @@ Two ideas combined:
 
 **When it fails: late.** You can construct `PygameView()` perfectly fine. The error only appears when the game actually reaches that method (e.g., the first `show_word` call during play).
 
-## 3. Option B — ABC: the stricter alternative
+### 3. Option B — ABC: the stricter alternative
 
 ```python
 import abc
@@ -969,7 +971,7 @@ view = PygameView()
 
 **When it fails: early (fail-fast)** — at the single line in `run.py` where the view is created, before any game logic runs.
 
-## 4. Side by side
+### 4. Side by side
 
 | | Duck typing + `NotImplementedError` (current) | ABC |
 |---|---|---|
@@ -979,9 +981,9 @@ view = PygameView()
 | Enforced by | Tests + convention | The language itself |
 | Style | Loose, "Pythonic" | Strict, closer to Java/C# interfaces |
 
-## 5. The evidence: `test_view_is_instantiable`
+### 5. The evidence: `test_view_is_instantiable`
 
-### 5.1 The vocabulary: what does "instantiable" mean?
+#### 5.1 The vocabulary: what does "instantiable" mean?
 
 **To instantiate** a class means to *create an object from it* — the parentheses:
 
@@ -992,7 +994,7 @@ view = View()
 
 So **"View is instantiable"** simply means: *the line `view = View()` is allowed and doesn't crash.* That's all the word means.
 
-### 5.2 What the test does, line by line
+#### 5.2 What the test does, line by line
 
 ```python
 # tests/unit/test_view_interface.py:163
@@ -1007,7 +1009,7 @@ def test_view_is_instantiable():
 
 In plain English the test says: **"I expect `View()` to work. If it ever stops working, something changed in the design."**
 
-### 5.3 Why this is *evidence*
+#### 5.3 Why this is *evidence*
 
 > **A passing test is a frozen decision.**
 
@@ -1041,7 +1043,7 @@ E   TypeError: Can't instantiate abstract class View ...
 
 The test catches the design change and forces a conscious decision: "do I really want ABC now? Then I must also delete/rewrite this test." The design can only change **on purpose, with a visible test change** — never by accident.
 
-### 5.4 Live demo: loose vs. strict, observed
+#### 5.4 Live demo: loose vs. strict, observed
 
 A self-contained script (save as `abc_demo.py`, run with `python3 abc_demo.py`):
 
@@ -1101,13 +1103,13 @@ It only failed HERE, at CALL time, long after construction.
 
 That last row is the *price* of the loose design: it's more permissive, so mistakes surface later. The project compensates by testing the contract heavily — `test_all_methods_raise_not_implemented` (line 36), `test_all_methods_exist` (line 173), and `test_pause_signature` (line 75) in the same file.
 
-## 6. The beginner mental model
+### 6. The beginner mental model
 
 > **In Python, tests are written promises. A test like `test_view_is_instantiable` doesn't just check behavior — it records *which design was chosen on purpose*, so the choice stays visible and protected.**
 
 You'll see this pattern everywhere in professional code: a seemingly odd test with a docstring explaining *why* something is the way it is. That's not redundancy — it's documentation that the computer actually enforces for you, every time `pytest` runs.
 
-## 7. Quick self-check (try these to lock it in)
+### 7. Quick self-check (try these to lock it in)
 
 1. Run the §5.4 demo. Confirm the three observations: the loose base class is instantiable, the bad loose subclass is instantiable, and it only explodes at call time.
 2. In a **scratch copy** (not the real file), convert `hangman/view/view_interface.py` to an ABC, run `pytest tests/unit/test_view_interface.py`, and watch `test_view_is_instantiable` fail. Revert.
@@ -1118,9 +1120,11 @@ You'll see this pattern everywhere in professional code: a seemingly odd test wi
 ---
 ---
 
-# Topic 2.1 — Encapsulation & Information Hiding
+# 2. Object-Oriented Programming (OOP) Principles
 
-## The core idea
+## Topic 2.1 — Encapsulation & Information Hiding
+
+### The core idea
 
 Two related concepts:
 
@@ -1137,7 +1141,7 @@ The payoff: you can change *how* a class stores or computes something without br
 
 ---
 
-## Example 1: `Player` — the textbook case (`hangman/model/player.py`)
+### Example 1: `Player` — the textbook case (`hangman/model/player.py`)
 
 ```python
 class Player:
@@ -1158,7 +1162,7 @@ class Player:
         return self.health > 0
 ```
 
-### What's hidden, and what's exposed?
+#### What's hidden, and what's exposed?
 
 The raw fact is `self.health`. But the *meaningful operations* are wrapped in two methods:
 
@@ -1169,7 +1173,7 @@ The raw fact is `self.health`. But the *meaningful operations* are wrapped in tw
 
 **`is_alive()` (player.py:18-19)** encapsulates the definition of "alive" in one place.
 
-### "What if" — without encapsulation
+#### "What if" — without encapsulation
 
 Imagine the controller did this instead:
 
@@ -1185,7 +1189,7 @@ Problems this creates:
 - "What does death mean?" (`health == 0`?) is now duplicated in the controller and possibly the view. Change the rule (e.g., "eliminated at health < 2") and you must hunt down every copy.
 - With `lose_health()`, there is **exactly one place** where health changes, so the invariant can never be violated.
 
-### Who respects the boundary?
+#### Who respects the boundary?
 
 The controller never touches `health` to make decisions — it asks:
 
@@ -1208,7 +1212,7 @@ The view is "dumb": it displays whatever the player object reports. It doesn't k
 
 ---
 
-## Example 2: `Game` — internal state + a status-dictionary interface (`hangman/model/game.py`)
+### Example 2: `Game` — internal state + a status-dictionary interface (`hangman/model/game.py`)
 
 `Game` holds all the sensitive internal state (game.py:15-22):
 
@@ -1254,7 +1258,7 @@ if result.get("repeat"):
 
 Notice what the controller *cannot* do: it can't accidentally reveal the answer, double-count a letter, or desynchronize `remaining_spaces` from `unknown_word`, because it has no access path to do those things. All state transitions are **centralized** — which the study guide calls "State Management" in section 3.
 
-### Defensive copies — a subtle but important technique
+#### Defensive copies — a subtle but important technique
 
 ```python
 def get_visible_word(self) -> List[str]:        # game.py:256-257
@@ -1268,7 +1272,7 @@ These return **copies**, not the live objects. If they returned the real list/se
 
 (Contrast with `get_player()` at game.py:259-262, which deliberately returns the real `Player` object — but that's fine because `Player` itself enforces its own invariants through its methods.)
 
-### The `_` convention in action
+#### The `_` convention in action
 
 ```python
 def _normalize(self, text: str) -> str:   # game.py:34
@@ -1278,7 +1282,7 @@ The leading underscore says: "this is an implementation detail. Outside code (in
 
 ---
 
-## Example 3: `WordRepository` — hiding complexity, not just data
+### Example 3: `WordRepository` — hiding complexity, not just data
 
 Encapsulation isn't only about protecting data; it's also about **hiding how something is done**. `WordRepository` (word_repository.py) internally does:
 
@@ -1301,7 +1305,7 @@ The controller never imports `json`, never opens the file, never knows words are
 
 ---
 
-## The boundary in the MVC structure
+### The boundary in the MVC structure
 
 You can see encapsulation expressed architecturally:
 
@@ -1315,7 +1319,7 @@ The controller is the only component that *calls* model methods; the view never 
 
 ---
 
-## Honest caveats (worth knowing as a beginner)
+### Honest caveats (worth knowing as a beginner)
 
 1. **Python privacy is a promise, not an enforcement.** `player.health = 0` is perfectly valid Python from anywhere. You'll even see it in *your tests*, e.g. `test_player.py:100` (`player.health = initial_health`) and `test_game.py:105` — tests commonly set state directly to create a starting condition, then exercise one method. That's an accepted practice: tests are inside the "trusted" boundary.
 2. **`Game` itself reaches into `Player`** in one place — `reset_for_new_round()` does `p.health = p.max_health` (game.py:93) instead of a `player.reset()` method. It works, but the "cleaner" design would add a method to `Player`. A good exercise for you: add `def restore_health(self)` to `Player` and use it there, so *no* health mutation exists outside the `Player` class.
@@ -1323,7 +1327,7 @@ The controller is the only component that *calls* model methods; the view never 
 
 ---
 
-## Summary
+### Summary
 
 | Concept | Where to see it |
 |---|---|
@@ -1340,7 +1344,7 @@ The one-sentence version: **callers interact with *what a class does*, never wit
 ---
 ---
 
-# Topic 2.2 — Abstraction
+## Topic 2.2 — Abstraction
 
 **Abstraction** means exposing *only what a component does* while hiding *how it does it*. Callers work with a simple, stable interface; the complex internals can change without touching the callers.
 
@@ -1353,7 +1357,7 @@ Let's walk through each with real code.
 
 ---
 
-## Example 1: `WordRepository` — hiding complexity behind one simple method
+### Example 1: `WordRepository` — hiding complexity behind one simple method
 
 This is the flagship example from the study guide. Look at the public API (`hangman/services/word_repository.py:146`):
 
@@ -1390,7 +1394,7 @@ Guarantees:
 """
 ```
 
-### The payoff: the caller is trivially simple
+#### The payoff: the caller is trivially simple
 
 In `hangman/controller/game_controller.py:91–97` the controller just does:
 
@@ -1411,7 +1415,7 @@ The controller has **no idea** (and doesn't need to know) that words come from a
 
 **Why this matters:** if tomorrow the word bank moves from a JSON file to a SQLite database or a web API, you rewrite the *inside* of `WordRepository` and the controller doesn't change one line. That's the abstraction paying off.
 
-### Abstraction vs. encapsulation, side by side
+#### Abstraction vs. encapsulation, side by side
 
 These two concepts are often confused; `WordRepository` shows the difference clearly:
 
@@ -1422,7 +1426,7 @@ Abstraction decides *what to hide*; encapsulation is the *mechanism* that hides 
 
 ---
 
-## Example 2: the `View` base class — an *abstract* contract
+### Example 2: the `View` base class — an *abstract* contract
 
 Now the second meaning. `hangman/view/view_interface.py` defines a class that describes **what every view must be able to do**, without doing anything itself:
 
@@ -1476,7 +1480,7 @@ class ConsoleView(View):
 
 Because `GameController` only ever talks to `self.view` through those 8 methods (e.g. `self.view.show_word(self.game.get_visible_word())` at `game_controller.py:163`), you could write a `PygameView` or `TkinterView` class that implements the same 8 methods, swap it in, and the controller would work unchanged.
 
-### Two ways to enforce the contract (Option A vs Option B)
+#### Two ways to enforce the contract (Option A vs Option B)
 
 The study guide highlights a deliberate design choice here:
 
@@ -1494,7 +1498,7 @@ class View(abc.ABC):
 
 Now the *language* enforces the contract: creating an incomplete subclass fails **at construction** with a `TypeError`. This is **early / fail-fast** failure.
 
-### The test that freezes the decision
+#### The test that freezes the decision
 
 `tests/unit/test_view_interface.py` guards this design with two kinds of tests:
 
@@ -1525,7 +1529,7 @@ This test is a **design tripwire**: if someone later "fixes" `View` into a true 
 
 ---
 
-## Example 3: `Game` — behavior-level abstraction of game rules
+### Example 3: `Game` — behavior-level abstraction of game rules
 
 The third example is subtler. `Game` (`hangman/model/game.py:8`) is a "pure game model: contains all rules and state but performs no I/O." The abstraction here is **behavioral**: the controller never implements game rules itself. It calls one method and reads a structured result.
 
@@ -1578,7 +1582,7 @@ Notice the **abstraction boundary in action**:
 
 ---
 
-## How abstraction pays off in the tests (tying it together)
+### How abstraction pays off in the tests (tying it together)
 
 Because the controller depends on the *abstract* `View` contract rather than on real console I/O, `tests/unit/test_game_controller.py:14` can do:
 
@@ -1592,7 +1596,7 @@ A `Mock()` object "implements" any contract automatically — every method retur
 
 ---
 
-## Summary
+### Summary
 
 | Abstraction | Hidden complexity | Simple interface exposed |
 |---|---|---|
@@ -1606,9 +1610,9 @@ The through-line: **every caller in this codebase only ever sees a small, stable
 ---
 ---
 
-# 2.3 — Single Responsibility Principle (SRP)
+## 2.3 — Single Responsibility Principle (SRP)
 
-## The principle in one sentence
+### The principle in one sentence
 
 **A class should have only *one reason to change*.** In practice: each class owns exactly one job (one "responsibility"), and everything in that class serves that job. If you can name two unrelated reasons why you'd edit a class, it probably has two responsibilities and should be split.
 
@@ -1622,7 +1626,7 @@ Let's see each one in the code.
 
 ---
 
-## Responsibility 1: `Player` — identity and health only
+### Responsibility 1: `Player` — identity and health only
 
 `hangman/model/player.py` is only 19 lines. Its entire job: *know who it is and how much health it has left.*
 
@@ -1655,7 +1659,7 @@ class Player:
 
 ---
 
-## Responsibility 2: `Game` — the rules and round state only
+### Responsibility 2: `Game` — the rules and round state only
 
 `hangman/model/game.py:8-9` is self-documenting about its single job:
 
@@ -1698,7 +1702,7 @@ Key SRP observations:
 
 ---
 
-## Responsibility 3: `WordRepository` — word data management only
+### Responsibility 3: `WordRepository` — word data management only
 
 `hangman/services/word_repository.py:10-18` announces its job in the docstring:
 
@@ -1736,7 +1740,7 @@ Note the beautiful boundary in that method: `WordRepository` **knows nothing abo
 
 ---
 
-## How SRP pays off in this project
+### How SRP pays off in this project
 
 1. **MVC falls out naturally.** SRP is the micro-level version of Separation of Concerns:
    - Model = `Player` + `Game` (rules and state, zero I/O)
@@ -1751,7 +1755,7 @@ Note the beautiful boundary in that method: `WordRepository` **knows nothing abo
    
    Each change has exactly one home — that's SRP working.
 
-## A quick heuristic for you as a beginner
+### A quick heuristic for you as a beginner
 
 When writing (or reviewing) a class, run this check:
 
