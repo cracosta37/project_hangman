@@ -1944,3 +1944,269 @@ The design is low-coupling in spirit, but a couple of spots read *internal attri
 These work fine today and are common in small projects. To tighten coupling to 100%, you'd add small query methods (e.g., `Game.player_count()`) and pass pre-formatted text into the view. The real skill is learning to tell the difference between **calling a door** and **reaching through a wall**.
 
 **TL;DR for 2.4:** each class (`Player`, `Game`, `WordRepository`, `ConsoleView`, `GameController`) is *highly cohesive* because every method serves one job, and they are *loosely coupled* because they interact only through injected references and well-defined method contracts (the 8-method `View` interface and `Game`'s result dictionaries) — which is precisely what makes the whole suite mockable in `tests/`.
+
+---
+---
+
+# 3. Software Design Patterns
+
+## Topic 3.1 — Repository Pattern
+
+### 1. What is the Repository Pattern?
+
+The **Repository Pattern** is a way to isolate *where and how data is stored* from the code that *uses* the data. Instead of letting your business logic read files, query databases, or call APIs directly, you create a dedicated class — the **repository** — that:
+
+1. **Hides the storage mechanism** (JSON file, SQLite, MySQL, a web API...) behind a simple, stable interface.
+2. **Guarantees data quality** — it validates and normalizes everything before handing it out.
+3. **Exposes a small public API** — the rest of the application only calls a few well-defined methods.
+
+The mental model: the repository is a *middleman* or *manager* between your application and its data source. The rest of the app never asks "how is the data stored?" — it just asks the repository for what it needs.
+
+> The study guide says it in one line: *"The `WordRepository` decouples data storage from application business logic. The application doesn't care if the word bank is a JSON file, a database, or an external web API."* (`docs/study_guide.md:53-54`)
+
+---
+
+### 2. The Repository in This Codebase: `WordRepository`
+
+The pattern lives in `hangman/services/word_repository.py`. Look at the class docstring — it states its **contract** explicitly:
+
+```python
+# hangman/services/word_repository.py:10-18
+class WordRepository:
+    """
+    Loads, validates, normalizes, and serves words/phrases.
+
+    Guarantees:
+    - All stored words satisfy Game.set_word() constraints
+    - All internal storage is normalized
+    - No-repeat enforced at session level
+    """
+```
+
+That docstring is the essence of the pattern: it's a **promise** to every caller. Any code that asks the repository for a word can trust it will be clean, valid, normalized, and not repeated this session.
+
+#### 2.1 The public API (the "interface" of the repository)
+
+The entire public surface is just **two methods**:
+
+```python
+# hangman/services/word_repository.py:146
+def get_by_difficulty(self, difficulty: str) -> str:
+    """
+    Return a random unused word for the given difficulty key ("EASY","MEDIUM","HARD").
+    Raises ValueError if difficulty is invalid or no words are available.
+    """
+
+# hangman/services/word_repository.py:170
+def reset_session(self) -> None:
+    """Clear session-level used-word cache."""
+```
+
+That's it. The rest of the application only ever uses `get_by_difficulty()` and `reset_session()`.
+
+#### 2.2 What's hidden behind that tiny API
+
+Everything else in the class is **private implementation detail** (marked with `_`):
+
+| Private method | Responsibility hidden from the caller |
+|---|---|
+| `_load()` (line 35) | File existence check, `json.load()`, accepting two JSON shapes (dict or list) |
+| `_load_from_dict()` / `_load_from_list()` (lines 65, 80) | Parsing structure, ignoring unknown keys |
+| `_validate_normalize()` (line 84) | Type checks, empty/length checks (max 120 chars), allowed-character checks, minimum letter count |
+| `_normalize_for_internal()` (line 122) | Unicode NFD decomposition, accent stripping (`"á" → "A"`), uppercasing, space collapsing |
+
+For example, look at how much complexity `_validate_normalize` absorbs (line 84-117): the caller never has to think about words containing digits, punctuation, being too long, or having accents. The repository silently **discards invalid entries** at load time (`_add_if_valid`, line 60), so by the time data reaches the rest of the app, it's guaranteed clean.
+
+And normalization (line 122-141):
+
+```python
+decomposed = unicodedata.normalize("NFD", text)
+filtered = "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
+collapsed = " ".join(filtered.split())
+return collapsed.upper()
+```
+
+This is why guessing `"a"` later matches an `"á"` in the secret word — that subtle correctness rule is *encapsulated inside the repository*, not scattered across the game logic.
+
+#### 2.3 Stateful behavior: session-level no-repeat
+
+A repository isn't just a passive reader; this one also manages **state** about what's been handed out:
+
+```python
+# hangman/services/word_repository.py:28, 159-167
+self.used_words: Set[str] = set()
+...
+available = self.normalized_words_by_diff[key] - self.used_words
+if not available:
+    raise ValueError(f"No unused words remaining for difficulty: {key}")
+selection = random.choice(tuple(sorted(available)))
+self.used_words.add(selection)
+return selection
+```
+
+The "don't show me the same word twice this session" rule lives **entirely** inside the repository. The controller and game don't track used words at all — they simply ask, and the repository refuses to repeat. When the user wants to start fresh, the single call `reset_session()` (line 170) does it.
+
+This is a key repository virtue: **the rules about the data live with the data**, so they can't be forgotten or duplicated in other places.
+
+---
+
+### 3. Who Uses the Repository — and How Little They Need to Know
+
+The only consumer in the app is `GameController`. Notice how simple the interaction is:
+
+```python
+# hangman/controller/game_controller.py:22
+self.word_repo = WordRepository(BASE_DIR / "data" / "word_bank.json")
+
+# hangman/controller/game_controller.py:93
+selected = self.word_repo.get_by_difficulty(difficulty)
+```
+
+And when the bucket runs out, the controller reacts to the repository's **error contract** (line 398-429):
+
+```python
+try:
+    selected = self.word_repo.get_by_difficulty(difficulty)
+except ValueError as e:
+    if self._is_exhaustion_error(e):
+        # offer: reset session / change difficulty / exit
+        ...
+        self.word_repo.reset_session()
+```
+
+The controller knows **nothing** about JSON, file paths after construction, unicode, or validation. It knows exactly two things: "give me a word for this difficulty" and "tell me `ValueError` if you can't." If tomorrow the word bank moves to a PostgreSQL database, the controller's code doesn't change one line.
+
+---
+
+### 4. The Two Big Payoffs of the Pattern (visible in the tests)
+
+#### 4.1 The repository is testable in complete isolation
+
+Because all storage logic is in one class, `tests/unit/test_word_repository.py` tests it directly — building **throwaway word banks** with pytest's `tmp_path` fixture, no real app, no console:
+
+```python
+# tests/unit/test_word_repository.py:20-24
+@pytest.fixture
+def make_repo(make_json_file):
+    def _make(data):
+        return WordRepository(make_json_file(data))
+    return _make
+```
+
+This lets the test suite verify every guarantee in the docstring independently:
+
+- `test_init_missing_file_raises_error` (line 75) → `FileNotFoundError` when the file is absent
+- `test_init_invalid_json_raises_error` (line 80) → `ValueError` on broken JSON
+- `test_get_by_difficulty_no_repeats` (line 232) → the no-repeat guarantee
+- `test_get_by_difficulty_exhaustion` (line 240) → the exhaustion `ValueError`
+- `test_get_by_difficulty_isolation` (line 265) → difficulty buckets don't leak into each other
+
+Without the pattern, these behaviors would be entangled inside the controller/game and far harder to test in isolation.
+
+#### 4.2 The repository can be *replaced with a fake* when testing other classes
+
+This is the payoff of "program to the interface." In `tests/unit/test_game_controller.py`, the real repository (which needs a JSON file) is swapped for a `Mock`:
+
+```python
+# tests/unit/test_game_controller.py:56-62
+@pytest.fixture
+def word_repo_factory():
+    def _factory():
+        repo = Mock()
+        repo.get_by_difficulty.return_value = "TEST"
+        return repo
+    return _factory
+
+# tests/unit/test_game_controller.py:71-72
+controller.game = game_factory()
+controller.word_repo = word_repo_factory()
+```
+
+The controller tests now run **without any data file at all**, and can even verify *how* the repository is used:
+
+```python
+# tests/unit/test_game_controller.py:231
+controller.word_repo.get_by_difficulty.assert_called_with("EASY")
+# tests/unit/test_game_controller.py:724, 743
+controller.word_repo.reset_session.assert_called()
+controller.word_repo.reset_session.assert_not_called()
+```
+
+Because the controller only ever touches `get_by_difficulty` and `reset_session`, a mock that knows just those two methods is a *perfect* stand-in. That's the pattern working exactly as intended.
+
+---
+
+### 5. What "Swapping the Storage" Would Look Like
+
+The theoretical point of the pattern is substitution. Imagine the requirements change:
+
+**Today — JSON file:**
+```python
+self.word_repo = WordRepository(BASE_DIR / "data" / "word_bank.json")
+```
+
+**Tomorrow — a database (same public API, different inside):**
+```python
+class DatabaseWordRepository:
+    """Same public API as WordRepository, backed by SQLite."""
+    def __init__(self, db_path: str):
+        self.conn = sqlite3.connect(db_path)
+        self.used_words: Set[str] = set()
+        # ... migration of load/validate/normalize logic ...
+
+    def get_by_difficulty(self, difficulty: str) -> str:
+        # SELECT ... FROM words WHERE difficulty = ?
+        ...
+
+    def reset_session(self) -> None:
+        self.used_words.clear()
+```
+
+Or a **web API repository** that fetches words from a server. In every case, `GameController`'s code (`selected = self.word_repo.get_by_difficulty(difficulty)`) stays byte-for-byte identical. That is the whole promise of the pattern: **storage becomes a swappable detail**.
+
+---
+
+### 6. How This Connects to Other Concepts in the Study Guide
+
+- **Abstraction (section 2):** the guide explicitly names this — *"The `WordRepository` class abstracts away file reading, JSON parsing, validation, and unicode cleanup, exposing a simple `get_by_difficulty(difficulty)` method."*
+- **Single Responsibility (section 2):** `WordRepository`'s *one* reason to change is "how words are stored and served." Game rules changing doesn't touch it; UI changing doesn't touch it.
+- **Separation of Concerns (section 1):** word loading, game mechanics, and I/O are in three separate places.
+- **Session-Level No-Repeat (section 4):** implemented *inside* the repository as the `used_words` set.
+- **Duck typing as the "interface" (section 1, Option A):** note there's no formal abstract base class like `View` — the "interface" here is simply the convention that any word source must provide `get_by_difficulty` and `reset_session`. The mock in the tests works precisely because of duck typing.
+
+---
+
+### 7. Critical Eye: Where This Implementation Can Grow
+
+As a good tutor, I'll point out one honest weakness — the controller **constructs** the repository itself with a hardcoded path:
+
+```python
+# hangman/controller/game_controller.py:22
+self.word_repo = WordRepository(BASE_DIR / "data" / "word_bank.json")
+```
+
+Compare that to the `view` and `constants_module`, which are **injected** through the constructor (line 16). A more textbook version would inject the repository too:
+
+```python
+def __init__(self, view: ConsoleView, constants_module, word_repository):
+    self.view = view
+    self.c = constants_module
+    self.word_repository = word_repository
+```
+
+...and have `run.py` wire it up. That would (a) make the controller fully testable without monkey-patching `controller.word_repo` after construction, and (b) let you choose the data source at the composition root (`run.py`) without editing the controller. The current design works fine — and the tests compensate by replacing `word_repo` after the fact — but constructor injection is the "cleaner" end-state of the same idea.
+
+---
+
+### Summary — The One-Minute Version
+
+| Question | Answer in this codebase |
+|---|---|
+| What is the repository? | `WordRepository` (`hangman/services/word_repository.py`) |
+| What does it hide? | File I/O, JSON parsing, validation, unicode normalization, no-repeat state |
+| What's its public API? | `get_by_difficulty(difficulty)` and `reset_session()` |
+| Who uses it? | `GameController` (lines 22, 93, 383, 400, 415) |
+| What does it buy us? | Storage swappability, isolated testability, centralized data-quality rules |
+| Where do we see the payoff? | `test_word_repository.py` (real repo, temp files) and `test_game_controller.py` (repo mocked out) |
+
+If you remember one sentence: **the repository turns "the data lives in a JSON file" from a fact the whole app depends on, into a private detail one class manages.**
