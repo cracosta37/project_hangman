@@ -682,7 +682,7 @@ The one-sentence takeaway: **DI means "give me what I need, don't make me build 
 
 ---
 
-## Topic 1.4: Program to Interfaces, Not Implementations
+## Topic 1.4 — Program to Interfaces, Not Implementations
 
 ### 1. The core idea in one sentence
 
@@ -1610,7 +1610,7 @@ The through-line: **every caller in this codebase only ever sees a small, stable
 ---
 ---
 
-## 2.3 — Single Responsibility Principle (SRP)
+## Topic 2.3 — Single Responsibility Principle (SRP)
 
 ### The principle in one sentence
 
@@ -1764,3 +1764,183 @@ When writing (or reviewing) a class, run this check:
 3. Does it **talk to other classes only through their public methods**, never by reaching into their internals? (The one exception in this codebase is `game.py:93`, `p.health = p.max_health` — a small pragmatic shortcut, worth knowing about so you can decide for yourself when strictness is worth it.)
 
 If you can pass all three, your class follows SRP — and so does every class in this Hangman codebase.
+
+---
+---
+
+## Topic 2.4 — High Cohesion & Low Coupling
+
+### 1. The two ideas in plain English
+
+These are two different qualities of a class:
+
+- **Cohesion** looks *inside* a class: do all its methods belong together around **one single job**?
+  - *High cohesion* = every method in the class is about the same thing. (Good)
+  - *Low cohesion* = a grab-bag of unrelated methods. (Bad — a "god class")
+
+- **Coupling** looks at the *lines between* classes: how much does one class depend on the **internal details** of another?
+  - *Low coupling* = classes only talk through small, well-defined doors (method calls + parameters). You can change one without touching the other. (Good)
+  - *High coupling* = a class reaches into another class's private fields/implementation. Change one and the other breaks. (Bad)
+
+**One-sentence summary:** cohesion is about the *inside* of a box; coupling is about the *thinness of the lines* between boxes. You want each box tightly focused, but the lines between boxes thin and formal.
+
+#### Restaurant analogy
+
+- The **kitchen** is highly cohesive — it *only* cooks. Every station (grill, pastry, sauté) is about food.
+- The kitchen is loosely coupled to the **dining room** — they communicate through one small, defined channel: a ticket goes in, a dish comes out. The cook never sees the customer's name or payment method.
+- If the cook also had to take the money *and* set the tables (high coupling), changing the payment system would force a redesign of the cooking.
+
+Map that to Hangman:
+
+| Role | Kitchen (logic) | Waiter (I/O) | Manager (coordination) | Pantry (data) |
+|------|-----------------|--------------|------------------------|---------------|
+| Class | `Game`, `Player` | `ConsoleView` | `GameController` | `WordRepository` |
+
+---
+
+### 2. The dependency map (the visual signature of low coupling)
+
+```
+                     run.py   (composition root)
+                   /    |     \
+          ConsoleView  |      constants
+                       v
+               GameController
+                 /     |      \
+              View    Game   WordRepository
+             (iface)   |
+                       Player
+```
+
+The arrows point in **one direction only**. The Model (`Game`/`Player`) and the View point at *nothing* in the app. Only the Controller and `run.py` know about the other pieces. That one-way flow is exactly what low coupling looks like on a diagram.
+
+---
+
+### 3. High Cohesion — one job per class
+
+#### `Player` — "a single player's identity and health"
+
+`hangman/model/player.py:4-19`
+```python
+class Player:
+    def __init__(self, name, max_health, hangman_states): ...
+    def lose_health(self) -> bool: ...
+    def is_alive(self) -> bool: ...
+```
+All three members revolve around **one topic**: how much life this player has. There is no word logic, no guessing, no printing. `Player` doesn't even know what a "guess" is.
+
+#### `WordRepository` — "load, validate, and serve words"
+
+`hangman/services/word_repository.py:10-172` — every method serves the word bank:
+- `_load`, `_load_from_dict`, `_load_from_list`, `_add_if_valid` → get words in from the file
+- `_validate_normalize`, `_normalize_for_internal` → clean + canonicalize them
+- `get_by_difficulty`, `reset_session` → hand them out
+
+It never displays anything and never scores a guess. *"I am the word bank, and that's all I do."*
+
+#### `Game` — "all the rules and state of a round"
+
+`hangman/model/game.py:8-265`:
+- Setup: `set_word`, `create_players`, `reset_for_new_round`
+- Rules: `guess_letter`, `guess_word`
+- State queries: `is_game_over`, `get_visible_word`, `get_player`, `get_remaining_letters`, `word_label`
+
+All of it is "the rules of Hangman." The docstring at `game.py:9` says it outright: *"Pure game model: contains all rules and state but performs no I/O."* There is no `print` and no `input` anywhere in the file.
+
+#### `ConsoleView` — "all console input/output"
+
+`hangman/view/console_view.py:8-54`: `clear`, `display`, `show_title`, `prompt`, `prompt_hidden`, `pause`, `show_word`, `show_health`. Every method either reads the keyboard or writes the screen. Zero game logic.
+
+#### `GameController` — "orchestrate the flow"
+
+`hangman/controller/game_controller.py:10-438`: the `choose_*` config prompts, `setup_game`, `run_game_loop`, `handle_letter_guess`, `handle_word_guess`, `start`, `exit_game`. Its job is to *decide what happens next* and *pass messages* between View and Model. It never implements a rule itself — it delegates (e.g., it calls `self.game.guess_letter(...)` at `game_controller.py:242` and just reacts to the result).
+
+**How to spot low cohesion (the anti-pattern):** a class named `GameManager` that also does `print()`, reads the word file, *and* scores guesses. That's a god class. This project deliberately split that into four classes — which is *why* each one is cohesive.
+
+---
+
+### 4. Low Coupling — thin, defined doors between classes
+
+**(a) Dependencies are handed in, not hard-wired (Dependency Injection)**
+`run.py:6-9`
+```python
+def run():
+    view = ConsoleView()
+    controller = GameController(view=view, constants_module=constants)
+    controller.start()
+```
+The controller does **not** build a `ConsoleView` itself. It *receives* a `view` through its constructor (`game_controller.py:16`). So the controller is coupled to *anything that behaves like a View*, not to the concrete `ConsoleView`. This is the single most important low-coupling move in the project.
+
+**(b) The controller talks to the view only through the 8-method contract**
+Throughout the controller you only ever see calls like:
+```python
+self.view.display(...)
+self.view.prompt(...)
+self.view.show_word(self.game.get_visible_word())
+self.view.show_health(player)
+self.view.pause(...)
+```
+(e.g., `game_controller.py:161-163`). Never `print()`/`input()` inside the controller. So `ConsoleView`, a hypothetical `PygameView`, or a `Mock` are all interchangeable, as long as they implement the 8 methods declared in `view_interface.py:4-29`. The door is thin and fixed.
+
+**(c) The Model returns data — it doesn't expose its insides**
+`Game.guess_letter` (`game.py:127-194`) returns a **dictionary** describing the outcome:
+```python
+return {
+    "ok": True, "repeat": False, "correct": True,
+    "positions": positions, "times": times,
+    "eliminated": False, "player_health": player.health,
+    "game_won": game_won, "game_over": ..., "winner": winner
+}
+```
+The controller reads only those keys. It never touches `game.word` or `game.unknown_word`. A dictionary is a small, read-only contract — a thin door. Change how `Game` stores its word internally and the controller won't notice.
+
+**(d) The View is "dumb" and stateless**
+`ConsoleView` holds no game knowledge. Even `show_health` (`console_view.py:52-53`) just prints what it's *given*:
+```python
+def show_health(self, player) -> None:
+    print(player.hangman_states[player.health])
+```
+It's handed a `player` and prints. It doesn't decide who's alive or what health *means*.
+
+**(e) Config is injected, not scattered**
+`MAX_HEALTH = 7` and the ASCII art live in `constants.py:1-59`. `Game` receives `constants_module` as a parameter (`game.py:11`) and reads `self.c.MAX_HEALTH` (`game.py:118`). `Player` receives `max_health` and `hangman_states` via its constructor (`player.py:7`). The magic values aren't hard-coupled into the logic — you can swap the constants module for a test double without editing `Game` or `Player`.
+
+**(f) `WordRepository` is a black box**
+It depends only on the standard library (`json`, `pathlib`, `random`, `unicodedata`) plus a `file_path` handed to it (`word_repository.py:23`). It has no import of `Game`, `View`, or the controller. Swap the JSON file for a database or an API and *only this one file* changes.
+
+---
+
+### 5. Why you should care: the payoff is testability
+
+Low coupling isn't a virtue for its own sake — it pays off in your test suite. Because the controller only talks to a *View-shaped* object, a test injects a `Mock` and drives a whole game **without a real terminal**:
+
+`tests/unit/test_game_controller.py:11-27`
+```python
+@pytest.fixture
+def view_factory():
+    def _factory():
+        view = Mock()
+        view.prompt.return_value = ""
+        view.prompt_hidden.return_value = ""
+        view.display.return_value = None
+        ...
+        return view
+    return _factory
+```
+If the controller called `input()`/`print()` directly (high coupling), this would be impossible — you'd have to fake the keyboard and capture the screen.
+
+Same story for the model — `Player` takes everything through its constructor, so a test builds any state with no I/O (`tests/unit/test_player.py:10-25`). And `test_view_interface.py:163-166` even pins the deliberate choice that `View()` stays instantiable (duck-typed contract, not a hard ABC).
+
+The chain: **Cohesion** lets you test each box *alone*. **Low coupling** lets you test the boxes *together* with cheap fakes.
+
+---
+
+### 6. One honest nuance (for going further)
+
+The design is low-coupling in spirit, but a couple of spots read *internal attributes* directly instead of going through a method. Recognizing this makes you a better reviewer:
+- `game_controller.py:151-152` uses `self.game.is_game_over()` (a method — good) but also `self.game.n_players` and `self.game.remaining_players` (direct attribute reads).
+- `console_view.py:53` reads `player.health` / `player.hangman_states` directly.
+
+These work fine today and are common in small projects. To tighten coupling to 100%, you'd add small query methods (e.g., `Game.player_count()`) and pass pre-formatted text into the view. The real skill is learning to tell the difference between **calling a door** and **reaching through a wall**.
+
+**TL;DR for 2.4:** each class (`Player`, `Game`, `WordRepository`, `ConsoleView`, `GameController`) is *highly cohesive* because every method serves one job, and they are *loosely coupled* because they interact only through injected references and well-defined method contracts (the 8-method `View` interface and `Game`'s result dictionaries) — which is precisely what makes the whole suite mockable in `tests/`.
