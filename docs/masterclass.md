@@ -2210,3 +2210,197 @@ def __init__(self, view: ConsoleView, constants_module, word_repository):
 | Where do we see the payoff? | `test_word_repository.py` (real repo, temp files) and `test_game_controller.py` (repo mocked out) |
 
 If you remember one sentence: **the repository turns "the data lives in a JSON file" from a fact the whole app depends on, into a private detail one class manages.**
+
+---
+---
+
+## Topic 3.2 — Factory Method Pattern (in Testing)
+
+Per the study guide (docs/study_guide.md:55-57), this project uses a **factory fixture** (e.g. `make_player` in `test_player.py`) that *"encapsulates the instantiation details of test objects, allowing you to configure custom states dynamically while providing sensible defaults."*
+
+### 1. What the pattern is
+
+The classic GoF **Factory Method** says: *don't make the caller construct objects directly with `new`/constructor calls — route construction through a dedicated "factory" method.* In the pytest world, the factory is a **fixture that returns a callable**. The test calls it with whatever arguments it needs and gets a freshly built object.
+
+It solves three problems at once:
+
+| Problem | How the factory fixes it |
+|---|---|
+| Constructor boilerplate repeated in every test | All instantiation lives in one place |
+| Every test needs slightly different state | Defaults + keyword overrides per call |
+| Tests sharing one pre-built object can interfere | Each factory call returns a **fresh** instance |
+
+### 2. The core factory: `make_player`
+
+tests/unit/test_player.py:9-25:
+
+```python
+@pytest.fixture
+def make_player():
+    def _make_player(
+        name="Alice",
+        max_health=5,
+        hangman_states=None
+    ):
+        if hangman_states is None:
+            hangman_states = ["state1", "state2", "state3"]
+
+        return Player(
+            name=name,
+            max_health=max_health,
+            hangman_states=hangman_states
+        )
+
+    return _make_player
+```
+
+Mechanics of how pytest runs this:
+
+1. A test asks for `make_player` in its signature.
+2. pytest runs the fixture **once per test** and receives the inner closure `_make_player` — *not* a `Player`.
+3. The test then calls `make_player(...)` **as many times as it wants**, with any arguments, getting a brand-new `Player` each time.
+
+Two deliberate details worth noticing:
+
+- **Sensible defaults** — `name="Alice"`, `max_health=5`, so the most common case is a zero-argument call: `make_player()`.
+- **`None` sentinel for the mutable default** — `hangman_states=None` followed by substitution inside the function. If it were `hangman_states=["state1", ...]` directly, all calls would share the same list object (the classic Python mutable-default trap). The `None` check guarantees each call gets its own list.
+
+### 3. Using the factory: same test, many states
+
+**Custom overrides** — tests/unit/test_player.py:61-67:
+
+```python
+def test_constructor_initializes_attributes(make_player, name, max_health, states):
+    player = make_player(name=name, max_health=max_health, hangman_states=states)
+    assert player.name == name
+    ...
+```
+
+**Parametrized sweep** — tests/unit/test_player.py:97-105. Without the factory, each of the 5 parameter rows would need its own `Player(...)` construction:
+
+```python
+def test_lose_health_behavior(make_player, initial_health, expected_health, expected_return):
+    player = make_player(max_health=initial_health)
+    player.health = initial_health
+    result = player.lose_health()
+    assert player.health == expected_health
+    assert result is expected_return
+```
+
+**Computing arguments at call time** — tests/unit/test_player.py:131-135:
+
+```python
+def test_is_alive(make_player, health, expected):
+    player = make_player(max_health=max(health, 1))  # max_health must be >= 1 to reach 0 later
+    player.health = health
+    assert player.is_alive() is expected
+```
+
+Note the test *derives* the constructor argument from the parameter (`max(health, 1)`). That logic only makes sense with a callable factory — a static fixture can't adapt per call.
+
+### 4. Semantic fixtures built ON the factory
+
+tests/unit/test_player.py:32-46 — this is the payoff of the pattern. Once the factory exists, "named state" fixtures become one-liners:
+
+```python
+@pytest.fixture
+def player(make_player):
+    return make_player()
+
+@pytest.fixture
+def low_health_player(make_player):
+    return make_player(max_health=1)
+
+@pytest.fixture
+def dead_player(make_player):
+    player = make_player(max_health=1)
+    player.lose_health()
+    return player
+```
+
+Now tests read by *intent*, not by construction detail — tests/unit/test_player.py:138-141:
+
+```python
+def test_is_alive_after_transition(low_health_player):
+    low_health_player.lose_health()
+    assert low_health_player.is_alive() is False
+```
+
+If `Player.__init__` ever changes its signature, you edit **one** factory, not every fixture and test. That is the DRY benefit the study guide highlights in section 5 (Pytest Fixtures).
+
+### 5. A second example: factories composed in a chain
+
+tests/unit/test_word_repository.py:11-44 shows the same idea scaled up — a factory *of* a factory:
+
+```python
+@pytest.fixture
+def make_json_file(tmp_path):
+    def _make(data, filename="words.json"):
+        file_path = tmp_path / filename
+        file_path.write_text(json.dumps(data), encoding="utf-8")
+        return file_path
+    return _make
+
+@pytest.fixture
+def make_repo(make_json_file):          # a factory that depends on another factory
+    def _make(data):
+        return WordRepository(make_json_file(data))
+    return _make
+
+@pytest.fixture
+def repo_with_words(make_repo):
+    return make_repo({
+        "easy": ["cat", "dog"],
+        "medium": ["python"],
+        "hard": ["architecture"]
+    })
+
+@pytest.fixture
+def repo_single_word(make_repo):
+    return make_repo({"easy": ["cat"]})
+```
+
+The layering is:
+
+```
+make_json_file  (builds a file with any content)
+      └── make_repo  (builds a WordRepository from any data)
+              ├── repo_with_words   (semantic: 3 difficulties)
+              └── repo_single_word  (semantic: 1 word)
+```
+
+Each layer hides one more detail (path handling, JSON serialization, construction), so tests can say `make_repo([...])` without knowing anything about `tmp_path` or `json.dumps`.
+
+### 6. Factory vs. plain fixture — the contrast
+
+tests/unit/test_game.py:13-29 shows the *other* style used in this codebase, for comparison:
+
+```python
+@pytest.fixture
+def game(constants):
+    return Game(constants)
+
+@pytest.fixture
+def game_with_players(game):
+    game.create_players(["Alice", "Bob"])
+    return game
+
+@pytest.fixture
+def prepared_game(game_with_players):
+    game_with_players.set_word("HELLO")
+    return game_with_players
+```
+
+These fixtures **return finished objects with no customization points**. They're fine when every test wants exactly that state. The moment a test needs a *variant* (different word, different player count), a plain fixture can't help — you'd have to build the object by hand in the test, duplicating setup logic. The factory exists precisely for that "variants" case:
+
+- **Plain fixture** → "give me the standard object" (zero arguments, one shape).
+- **Factory fixture** → "give me a builder I can parameterize per call."
+
+### Key takeaways
+
+1. A factory fixture = `@pytest.fixture` that **returns a function**; the function does the actual construction.
+2. Defaults make the common case cheap; keyword arguments make the unusual case possible.
+3. Every call produces a fresh object → test isolation comes for free.
+4. Semantic fixtures (`dead_player`, `repo_with_words`) are thin wrappers over the factory, so test code reads as behavior, not setup.
+5. Factories compose: `make_repo` wraps `make_json_file`, hiding file-system details one level at a time.
+6. This is the testing-side twin of the production **Repository Pattern** in the same section of the guide: both patterns are about *hiding how objects/artifacts come into existence*.
