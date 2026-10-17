@@ -2230,6 +2230,78 @@ It solves three problems at once:
 | Every test needs slightly different state | Defaults + keyword overrides per call |
 | Tests sharing one pre-built object can interfere | Each factory call returns a **fresh** instance |
 
+#### 1.1 What "callable" actually means
+
+In Python, a **callable** is *anything you can write `(...)` after* — anything Python knows how to invoke. There is even a built-in to check it: `callable(x)`.
+
+```python
+def make_player(name="Alice"): ...
+print(callable(make_player))        # True  ← a function; you can write make_player(...)
+print(callable(make_player()))      # False ← the RESULT (a dict) can't be called
+print(callable(list))               # True  ← a class is callable: list() builds a list
+print(callable(lambda: 1))          # True  ← lambdas are functions
+
+class Box:
+    def __call__(self, x): return x * 2
+print(callable(Box()))              # True  ← an instance with __call__ is callable too
+```
+
+Observed output:
+
+```
+callable(make_player): True
+callable(make_player()): False
+callable(list): True
+callable(Box()): True
+```
+
+So "callable" doesn't specifically mean "a function" — it means "an object Python knows how to invoke with `(...)`". Functions are the most common example, which is why in everyday code the two words are often used interchangeably.
+
+#### 1.2 Unpacking "the factory is a fixture that returns a callable"
+
+A **plain** fixture hands the test a *finished* object — the fixture value is the object itself, already built:
+
+```python
+@pytest.fixture
+def game(constants):
+    return Game(constants)      # fixture value = an already-built Game instance
+```
+
+A **factory** fixture is different: its body *does not* build the object — it **returns a function**, and that function is the callable. Look at `make_player` (tests/unit/test_player.py:9-25, shown in full in §2):
+
+```python
+@pytest.fixture
+def make_player():
+    def _make_player(name="Alice", max_health=5, hangman_states=None):
+        ...
+        return Player(...)
+    return _make_player          # ← the fixture's value is this FUNCTION, not a Player
+```
+
+When a test asks for `make_player`, pytest runs the outer body once and hands the test back `_make_player`. So inside the test, the variable `make_player` **holds a callable** — until you write `make_player(...)`, nothing is built. Construction is *deferred* to the moment the test calls it:
+
+```python
+def test_something(make_player):
+    p1 = make_player()                          # call 1 → fresh Player("Alice", 5)
+    p2 = make_player(name="Bob", max_health=1)  # call 2 → fresh Player("Bob", 1)
+```
+
+That is the opening sentence, unpacked:
+
+- **"the factory is a fixture that returns a callable"** → `@pytest.fixture def make_player(): ... return _make_player`
+- **"the test calls it with whatever arguments it needs"** → `make_player(name="Bob", max_health=1)`
+- **"and gets a freshly built object"** → each call runs `Player(...)` again, so every call is a brand-new instance with no shared state.
+
+#### 1.3 What the callable buys you
+
+| Plain fixture (`return Game(...)`) | Factory fixture (`return _make_player`) |
+|---|---|
+| Object built **once, immediately** when the fixture runs | Object built **each time** the test calls the function |
+| Always the same shape — no per-test customization | Different arguments per call (`make_player(max_health=1)`) |
+| Can't compute arguments at call time | Can: `make_player(max_health=max(health, 1))` (test_player.py:132) |
+
+The third row is the decisive one: a plain fixture's return value is **fixed before the test body runs**, so it can never adapt to the test's parameters. The callable only "decides" when it is actually invoked — which is why §3 notes that "a static fixture can't adapt per call."
+
 ### 2. The core factory: `make_player`
 
 tests/unit/test_player.py:9-25:
@@ -2264,6 +2336,71 @@ Two deliberate details worth noticing:
 
 - **Sensible defaults** — `name="Alice"`, `max_health=5`, so the most common case is a zero-argument call: `make_player()`.
 - **`None` sentinel for the mutable default** — `hangman_states=None` followed by substitution inside the function. If it were `hangman_states=["state1", ...]` directly, all calls would share the same list object (the classic Python mutable-default trap). The `None` check guarantees each call gets its own list.
+
+#### 2.1 Convention or mechanics? — why the sentinel is required
+
+Those two bullets are not a matter of taste — they are forced by one Python rule:
+
+> **Default argument values are evaluated exactly once — when the `def` line executes (at import time) — and the resulting object is shared by every call that omits that argument.**
+
+That rule explains both bullets at once:
+
+- `name="Alice"` / `max_health=5` — `str` and `int` are **immutable**. All calls do share the same `"Alice"` object, but nobody can mutate a string or int in place, so sharing is harmless. Writing the sensible value directly is fine and maximizes ergonomics (a zero-argument `make_player()` "just works").
+- `hangman_states=None` — a `list` is **mutable**, so writing it directly would turn the shared-object rule into cross-call contamination. Live demo:
+
+```python
+# --- BAD: mutable default written directly ---
+def make_player_bad(name='Alice', states=['s1', 's2']):
+    return {'name': name, 'states': states}
+
+a = make_player_bad()
+b = make_player_bad()
+print('same list object?', a['states'] is b['states'])
+a['states'].append('boom')
+print('b after mutating a:', b['states'])
+
+# --- GOOD: None sentinel + substitution inside ---
+def make_player_good(name='Alice', states=None):
+    if states is None:
+        states = ['s1', 's2']
+    return {'name': name, 'states': states}
+
+a = make_player_good()
+b = make_player_good()
+print('same list object?', a['states'] is b['states'])
+a['states'].append('boom')
+print('b after mutating a:', b['states'])
+
+# --- why: defaults are captured ONCE, at def-time ---
+print('default captured at def:', make_player_bad.__defaults__)
+```
+
+Observed output:
+
+```
+same list object? True
+b after mutating a: ['s1', 's2', 'boom']
+same list object? False
+b after mutating a: ['s1', 's2']
+default captured at def: ('Alice', ['s1', 's2', 'boom'])
+```
+
+Three findings:
+
+1. Two calls, **one** list (`is` → `True`).
+2. Mutating one call's list **leaks into the other**.
+3. The clincher: `make_player_bad.__defaults__` shows `('Alice', ['s1', 's2', 'boom'])` — **the default object itself was permanently mutated for the whole process lifetime**, including for tests running later in the session.
+
+So what does the sentinel actually do? `None` is just an immutable marker meaning "the caller gave me nothing". The substitution line executes **inside the function body, at call time**, so each invocation constructs its *own* list. That is the entire trick — it moves object creation from def-time to call-time.
+
+The consequence in this codebase is concrete: `Player` stores the list (`player.hangman_states`) and `ConsoleView.show_health` indexes into it (console_view.py:53). If two `Player`s shared one list, mutating one player's graphic array would silently mutate the other's — and in tests, one test's modification of a player's states would leak into every later test that called `make_player()` without states, the classic **order-dependent flaky test**.
+
+| Default type | Direct value | `None` sentinel |
+|---|---|---|
+| Immutable (`str`, `int`, `tuple`) | safe, idiomatic | also works, but pointless |
+| Mutable (`list`, `dict`, `set`) | **bug** (shared state) | required to get a fresh object per call |
+
+For mutable defaults, the `None` sentinel (or an equivalent — build the list unconditionally in the body, or `field(default_factory=list)` in a dataclass) is the only correct pattern. For immutables, the plain default is the ergonomic choice — which is exactly why `make_player` mixes the two: `"Alice"`/`5` direct, `hangman_states` via sentinel.
 
 ### 3. Using the factory: same test, many states
 
@@ -2317,14 +2454,52 @@ def dead_player(make_player):
     player.lose_health()
     return player
 ```
+#### 4.1 Now tests read by *behavior*, not by setup
 
-Now tests read by *intent*, not by construction detail — tests/unit/test_player.py:138-141:
+That payoff is what "reads as behavior, not setup" means: the **visible body of the test describes what the game does** (the rule being checked), while **how the test objects are built is hidden behind a fixture name that states the intent in plain English.** The same test, two ways:
+
+**Without a semantic fixture** (calling the factory directly):
+
+```python
+def test_is_alive_after_transition(make_player):
+    player = make_player(max_health=1)   # ← setup detail in the body
+    player.lose_health()
+
+    assert player.is_alive() is False
+```
+
+The body mixes two kinds of information:
+
+1. **Setup**: `make_player(max_health=1)` — a construction detail. A reader must *decode* it: "max_health=1... means a player one hit from death?"
+2. **Behavior**: `lose_health()`, then `is_alive() is False` — the actual rule.
+
+**With the semantic fixture** (tests/unit/test_player.py:138-141):
 
 ```python
 def test_is_alive_after_transition(low_health_player):
     low_health_player.lose_health()
+
     assert low_health_player.is_alive() is False
 ```
+
+The setup line is gone from the body. The starting condition is now stated in the **fixture name** — `low_health_player` is a word from the game's own vocabulary. The test reads top to bottom like a rule from the game's rulebook:
+
+> *"A low-health player takes one hit → they are no longer alive."*
+
+The setup wasn't deleted — it was **relocated** into the fixture definitions above (test_player.py:37-46): the "how" lives there once, and states like `dead_player` become *domain words*. Any test that needs one reads like a specification:
+
+```python
+def test_something_about_elimination(dead_player):
+    ...
+```
+
+Why it matters:
+
+1. **Tests become documentation.** `test name + fixture names` compose a readable sentence about the rules. A reviewer can skim the suite and understand the game's behavior without reading a single `Player(...)` call.
+2. **The "how" is edited in one place.** If "low health" ever comes to mean `max_health=2`, or the constructor signature changes, you edit the one fixture — every test that reads as behavior stays byte-for-byte identical.
+3. **Attention goes to the point of the test.** The whole body is the thing under test; zero lines are scaffolding.
+
+One nuance: some tests still call the factory directly in the body — e.g. `test_is_alive` (test_player.py:132): `make_player(max_health=max(health, 1))`. That's deliberate: the argument is **computed per call** from the test's parameters, so there is no stable, nameable state to hide behind. Semantic fixtures pay off exactly when the starting condition is a **named state** in the game's vocabulary — "a dead player", "a repo with words", "a prepared game" — which is when the test can read as pure behavior.
 
 If `Player.__init__` ever changes its signature, you edit **one** factory, not every fixture and test. That is the DRY benefit the study guide highlights in section 5 (Pytest Fixtures).
 
@@ -2398,9 +2573,12 @@ These fixtures **return finished objects with no customization points**. They're
 
 ### Key takeaways
 
-1. A factory fixture = `@pytest.fixture` that **returns a function**; the function does the actual construction.
+1. A factory fixture = `@pytest.fixture` that **returns a callable**; the test — not the fixture — controls **when** the object is built and **with what arguments**, and every call returns a fresh instance.
 2. Defaults make the common case cheap; keyword arguments make the unusual case possible.
 3. Every call produces a fresh object → test isolation comes for free.
-4. Semantic fixtures (`dead_player`, `repo_with_words`) are thin wrappers over the factory, so test code reads as behavior, not setup.
-5. Factories compose: `make_repo` wraps `make_json_file`, hiding file-system details one level at a time.
-6. This is the testing-side twin of the production **Repository Pattern** in the same section of the guide: both patterns are about *hiding how objects/artifacts come into existence*.
+4. Default values are evaluated **once at def-time**: immutable defaults (`str`, `int`) are safe to write directly, mutable defaults (`list`, `dict`, `set`) must go through a `None` sentinel (or equivalent) so each call gets its own object.
+5. Semantic fixtures (`dead_player`, `repo_with_words`) are thin wrappers over the factory that turn construction details into **named states** — the test body then contains only behavior and reads like a sentence from the game's rulebook.
+6. Factories compose: `make_repo` wraps `make_json_file`, hiding file-system details one level at a time.
+7. This is the testing-side twin of the production **Repository Pattern** in the same section of the guide: both patterns are about *hiding how objects/artifacts come into existence*.
+
+**One-line summary:** A factory fixture returns a *callable* so construction happens at call-time with per-call arguments; the `None` sentinel is the mechanical (not stylistic) fix for Python's once-at-def-time default evaluation; and semantic fixtures lift the construction details out of the test body so the suite reads as behavior, not setup.
