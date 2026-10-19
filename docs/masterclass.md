@@ -2582,3 +2582,290 @@ These fixtures **return finished objects with no customization points**. They're
 7. This is the testing-side twin of the production **Repository Pattern** in the same section of the guide: both patterns are about *hiding how objects/artifacts come into existence*.
 
 **One-line summary:** A factory fixture returns a *callable* so construction happens at call-time with per-call arguments; the `None` sentinel is the mechanical (not stylistic) fix for Python's once-at-def-time default evaluation; and semantic fixtures lift the construction details out of the test body so the suite reads as behavior, not setup.
+
+---
+---
+
+## Topic 3.3 — State Management / State Transition
+
+From the study guide (`docs/study_guide.md:58-59`):
+
+> *The `Game` maintains variables representing state transitions (e.g., `remaining_players`, `remaining_spaces`, `game_won`, `game_over`). Methods return structured results reflecting these transitions, ensuring that state checks remain centralized.*
+
+Let me break this down for you as a beginner, using the actual code.
+
+---
+
+### 1. What "state" means
+
+The **state** of a program is simply the collection of values that describe "what is true right now." In a game, that's the most natural way to think: *who is playing, what word is hidden, how many letters are left, who is alive, has anyone won?*
+
+In this project, the **single source of truth** for game state is the `Game` class (`hangman/model/game.py:8`). Its constructor initializes every state variable (`game.py:15-22`):
+
+```python
+self.players: List[Player] = []      # who is in the game
+self.word: str = ""                  # the secret word (normalized)
+self.unknown_word: List[str] = []    # what the player can see ("_ _ A _")
+self.remaining_letters: set[str] = set()  # letters not yet guessed
+self.remaining_players: int = 0      # players still alive
+self.n_players: int = 0              # total players
+self.remaining_spaces: int = 0       # unfilled letter slots
+self.is_phrase: bool = False         # word or phrase?
+```
+
+Note there is **no** `game_won` or `game_over` field stored here. That's an important design decision we'll see in section 4 — those are **derived** from the stored state.
+
+State also lives one level *inside* each `Player` (`player.py:10-11`):
+
+```python
+self.max_health: int = max_health
+self.health: int = max_health
+```
+
+and in the `WordRepository` (`word_repository.py:28`):
+
+```python
+self.used_words: Set[str] = set()   # session-level no-repeat state
+```
+
+**Key rule of this project:** only the class that *owns* a piece of state is allowed to mutate it. The controller never does `player.health -= 1` — it can't, because the model exposes methods, not raw access to logic.
+
+---
+
+### 2. State transitions: events that change the state
+
+A **state transition** is an *event* (a method call) that moves the game from one state to another. In this codebase, every transition is a method on `Game`, and each one does exactly one thing: validate input → mutate state → return a report.
+
+#### Transition 1: `set_word` — "a word has been chosen" (`game.py:46-66`)
+
+```python
+normalized = self._normalize(word)
+self.word = normalized
+self.unknown_word = ["_" if ch.isalpha() else ch for ch in normalized]
+self.remaining_spaces = sum(ch == "_" for ch in self.unknown_word)
+self.is_phrase = (" " in word or "-" in word)
+return {"ok": True}
+```
+
+One event flips four state variables at once: the secret word, its visible mask, the counter of unfilled slots, and the word/phrase flag.
+
+#### Transition 2: `create_players` — "players have joined" (`game.py:104-121`)
+
+```python
+self.players = [Player(n, self.c.MAX_HEALTH, self.c.HANGMAN) for n in cleaned]
+self.n_players = len(self.players)
+self.remaining_players = self.n_players
+```
+
+#### Transition 3: `guess_letter` — the heart of the game (`game.py:127-194`)
+
+A single guess can trigger a *chain* of state changes:
+
+```python
+# consume letter from the pool (game.py:154)
+self.remaining_letters.remove(letter)
+
+# incorrect guess → player loses health (game.py:159-173)
+if times == 0:
+    eliminated = player.lose_health()
+    if eliminated:
+        self.remaining_players -= 1
+    return {
+        "ok": True, "repeat": False, "correct": False,
+        "eliminated": eliminated,
+        "player_health": player.health,
+        "game_won": False,
+        "game_over": self.remaining_players <= 0,
+        "winner": None
+    }
+
+# correct guess → reveal letters, reduce spaces (game.py:176-194)
+for pos in positions:
+    self.unknown_word[pos] = letter
+self.remaining_spaces -= times
+
+game_won = self.remaining_spaces == 0
+winner = player_index if game_won else None
+```
+
+Notice the player-level transition is delegated: `player.lose_health()` (`player.py:13-16`) is where the health decrement actually happens:
+
+```python
+def lose_health(self) -> bool:
+    previous = self.health
+    self.health = max(0, self.health - 1)
+    return previous > 0 and self.health == 0
+```
+
+The `max(0, ...)` clamp and the "was this the killing blow?" return value are encapsulated in the `Player` — the `Game` only reacts to the boolean.
+
+#### Transition 4: `reset_for_new_round` — a *partial* reset (`game.py:72-98`)
+
+Not every transition is a full reset. A new round keeps the players but restores everything else:
+
+```python
+self.remaining_letters = set(base_letters)   # fresh letter pool
+result = self.set_word(new_word)             # fresh word/mask/spaces
+for p in self.players:
+    p.health = p.max_health                  # players recover
+self.remaining_players = self.n_players      # counter restored
+return {"ok": True}
+```
+
+This is a classic state transition: `PLAYING → (round over) → PLAYING again`, with only *some* state preserved.
+
+---
+
+### 3. Derived state: compute, don't store
+
+Rather than storing `game_won` / `game_over` as fields that must be manually kept in sync, the model *computes* them on demand (`game.py:253-254`):
+
+```python
+def is_game_over(self) -> bool:
+    return self.remaining_players <= 0 or self.remaining_spaces == 0
+```
+
+**Why this matters for beginners:** if you stored a `self.game_over = False` flag, you'd have to remember to set it in *every* method that could end the game, and it would go stale if any mutation path forgot. Deriving it from the two variables that actually cause game over means it *cannot* disagree with the state. Same idea with `Player.is_alive()` (`player.py:18-19`) — derived from `health`, never stored.
+
+The controller's main loop is driven entirely by this derived state (`game_controller.py:151`):
+
+```python
+while not self.game.is_game_over() and self.game.remaining_players > 0:
+```
+
+The loop doesn't "know" how the game ends; it just re-queries the model each iteration.
+
+---
+
+### 4. Structured results: transitions report themselves
+
+Here's the second half of the study guide's sentence — *methods return structured results reflecting these transitions*. Look at what `guess_letter` returns:
+
+```python
+return {
+    "ok": True,
+    "repeat": False,
+    "correct": True,
+    "positions": positions,
+    "times": times,
+    "eliminated": False,
+    "player_health": player.health,
+    "game_won": game_won,
+    "game_over": self.remaining_players <= 0,
+    "winner": winner
+}
+```
+
+This dict is a **snapshot of the transition**: what happened, and which states changed. It encodes three categories of outcome:
+
+| Situation | Example return | Meaning |
+|---|---|---|
+| Rejected, retryable | `{"ok": False, "repeat": True, "error": "already used"}` | bad input or repeated letter — ask again |
+| Rejected, fatal | `{"ok": False, "repeat": False, "error": "eliminated"}` | cannot continue — leave the handler |
+| Accepted | `{"ok": True, ..., "game_won": ...}` | state actually changed |
+
+The controller consumes these reports without ever inspecting model internals (`game_controller.py:240-256`):
+
+```python
+result = self.game.guess_letter(player_index, raw_letter)
+
+# Non-recoverable error → exit handler
+if not result.get("ok") and not result.get("repeat"):
+    self.view.display(result.get("error", "Invalid operation.") + "\n")
+    self.view.pause()
+    return result
+
+# Recoverable error → retry input
+if result.get("repeat"):
+    self.view.display(result.get("error", "Invalid operation.") + "\n")
+    continue
+
+# Valid input
+break
+```
+
+And the winner is read straight from the transition report (`game_controller.py:184-187`):
+
+```python
+if result.get("game_won") and result.get("winner") is not None:
+    winner_index = result["winner"]
+    winner_player = self.game.get_player(winner_index)
+```
+
+**The payoff — "state checks remain centralized":** the only place in the entire codebase that decides *what* a win, a loss, or an elimination is, is `Game`. The controller and view only *react* to the reports. If the rules changed (say, wrong guesses cost 2 health), you'd edit `guess_letter` and nothing else.
+
+---
+
+### 5. The big picture: the app as a state machine
+
+Putting the transitions together, the whole application is a small state machine:
+
+```
+            setup_game()                    run_game_loop()
+  [START] ───────────────► [PLAYING] ──────────────────────────┐
+                          ▲        │                           │
+                          │        │ all players eliminated    │ someone wins
+                          │        ▼                           ▼
+                          │     [GAME OVER] ──────────── [WON]
+                          │        │                           │
+                          └────────┴── reset_for_new_round() ──┘
+                                     (Y: new round, players kept,
+                                      health restored, new word)
+                                     (N: exit_game())
+```
+
+The transitions are the controller's lifecycle methods:
+
+- `[START] → [PLAYING]`: `setup_game()` (`game_controller.py:69`) calls `set_word` + `create_players`.
+- `[PLAYING]` internal transitions: `guess_letter` / `guess_word` on each turn.
+- `[PLAYING] → [GAME OVER]/[WON]`: detected via `is_game_over()` in the loop condition.
+- `[GAME OVER] → [PLAYING]`: the `start()` loop (`game_controller.py:365-375`) asks "new game?", then `reset_for_new_round()` (`game.py:72`).
+- `→ [EXIT]`: `exit_game()` (`game_controller.py:436`).
+
+There's even a state transition *inside* the word repository: `get_by_difficulty` moves a word from "available" to "used" (`word_repository.py:159-167`), and `reset_session` clears that state (`word_repository.py:172`).
+
+---
+
+### 6. How the tests prove the transitions
+
+The test suite is essentially a map of the state machine. In `tests/unit/test_game.py`:
+
+```python
+def test_is_game_over_false_when_game_active(prepared_game):        # line 331
+    assert game.is_game_over() is False
+
+def test_is_game_over_when_no_players_remaining(prepared_game):     # line 334
+    prepared_game.remaining_players = 0
+    assert game.is_game_over() is True
+
+def test_is_game_over_when_word_completed(prepared_game):           # line 339
+    prepared_game.remaining_spaces = 0
+    assert game.is_game_over() is True
+```
+
+And transition reports are asserted directly (e.g., `test_game.py:252`, `311-313`):
+
+```python
+assert result["game_won"] is True
+assert prepared_game.remaining_spaces == 0
+```
+
+In `tests/unit/test_game_controller.py:350`, the controller tests simulate transitions without a real game by mocking the model:
+
+```python
+controller.game.is_game_over.side_effect = [False, True]
+```
+
+i.e., "the first loop check says still playing, the second says over" — proving the controller reacts correctly to *state changes*, not to specific words.
+
+---
+
+### Summary for beginners
+
+1. **State = data.** `Game` owns `remaining_players`, `remaining_spaces`, `remaining_letters`, `unknown_word`; `Player` owns `health`. Each class owns its own state.
+2. **Transition = event.** Methods like `guess_letter` (`game.py:127`) and `reset_for_new_round` (`game.py:72`) are the *only* doors through which state changes.
+3. **Derive, don't duplicate.** `is_game_over()` (`game.py:253`) and `is_alive()` (`player.py:18`) compute state from state — no stale flags.
+4. **Report the change.** Each transition returns a dict (`game_won`, `game_over`, `eliminated`, `repeat`, `winner`) so the controller orchestrates screens purely from reports — state logic stays centralized in the model.
+5. **The controller is just the edges of a state machine**: setup → play loop (driven by `is_game_over()`) → outcome → new round or exit.
+
+A good exercise: add a rule like "two players sharing the same name gets a bonus letter" and see how few places you need to touch — because every transition already funnels through the `Game` model.
