@@ -3093,3 +3093,260 @@ def test_normalize_for_internal_idempotent():
 6. **Idempotency is a design goal** — the function can be applied repeatedly (load time + guess time) without drifting.
 
 One honest caveat worth knowing: this recipe removes only `Mn` (non-spacing marks). Marks in other categories (`Mc` — spacing combining marks used by Devanagari/Thai — or `Me` — enclosing marks) would survive. For a Latin-alphabet word game, `Mn` is exactly right and the project documents its scope accordingly.
+
+---
+---
+
+## Topic 4.2 — Sanitization and Validation
+
+### 1. Concepts first
+
+These are two related but distinct steps in handling data:
+
+| Term | Question it answers | What it does |
+|---|---|---|
+| **Validation** | *"Is this data acceptable?"* | Checks rules (type, length, allowed characters, uniqueness) and **accepts or rejects** the value. |
+| **Sanitization** | *"How do I make this data safe/canonical?"* | **Transforms** the value: trims whitespace, uppercases, strips accents, collapses spaces, deduplicates. |
+
+In this project, both happen **before** any data is trusted by the game logic. The guiding principle: *never assume input is correct* — not from the JSON word bank, not from the moderator typing a secret word, not from a player guessing a letter.
+
+The codebase has **two data sources** to protect against:
+
+1. **The word bank file** (JSON on disk) → guarded by `WordRepository` (`hangman/services/word_repository.py`)
+2. **Live user input** (moderator's secret word, player guesses, player names) → guarded by the `Game` model (`hangman/model/game.py`)
+
+---
+
+### 2. The central gate: `WordRepository._validate_normalize`
+
+This single method (word_repository.py:84-117) is the heart of topic 4.2. Every entry read from the JSON file passes through it:
+
+```python
+def _validate_normalize(self, raw: object) -> str | None:
+    if not isinstance(raw, str):
+        return None                      # 1. Type check
+
+    text = raw.strip()
+    if not text:
+        return None                      # 2. Empty / whitespace-only check
+
+    if len(text) > 120:
+        return None                      # 3. Length cap
+
+    alpha_count = 0
+    for ch in text:
+        if ch.isalpha():
+            alpha_count += 1
+        elif ch in {" ", "-"}:
+            continue
+        else:
+            return None                  # 4. Character whitelist
+
+    if alpha_count < 2:
+        return None                      # 5. Minimum letter count
+
+    return self._normalize_for_internal(text)
+```
+
+Read it as a **filtering pipeline** — the value must survive every stage, and the method returns `None` ("reject") the moment any rule fails:
+
+1. **Type check** — `123`, `None`, `[]`, `{}` in the JSON are rejected immediately. Note the parameter is typed `object`, not `str`: the code *expects* that garbage might arrive and handles it deliberately.
+2. **Empty check** — `raw.strip()` removes surrounding spaces *and* then rejects `""` and `"   "`. This is sanitization (the strip) feeding validation (the emptiness test).
+3. **Length cap (120)** — prevents abusive or corrupt entries that would wreck the display. The boundary is exact, and the tests pin it:
+   ```python
+   def test_validate_normalize_length_bounds(empty_repo):
+       assert empty_repo._validate_normalize("a" * 121) is None
+       assert empty_repo._validate_normalize("a" * 120) == "A" * 120
+   ```
+4. **Character whitelist** — the study guide's *"characters outside of allowed alphabets, hyphens, and spaces"*. Each character must be a letter (any language, since `isalpha()` is Unicode-aware) or one of `{" ", "-"}`. So `"dog!"` and `"hello123"` die here. A **whitelist** ("only allow these") is the safe approach — a blacklist ("ban these") would need updating every time a new weird character appears.
+5. **Minimum letter count (2)** — `"a"`, `"-"`, and `" - "` pass the character check (hyphens and spaces are allowed!) but contain fewer than 2 letters, so they're rejected. This is why you can't count on the character loop alone.
+
+Then, if it survived, **sanitization** happens in `_normalize_for_internal` (word_repository.py:122-141): NFD decomposition, removal of diacritics, space collapsing, uppercasing. So `"  café  "` becomes `"CAFE"` — a single canonical form.
+
+The parametrized tests in `tests/unit/test_word_repository.py:166-184` show the full contract:
+
+```python
+@pytest.mark.parametrize("value,expected", [
+    ("cat", "CAT"),                     # simple
+    ("  dog  ", "DOG"),                 # trimmed
+    ("hello   world", "HELLO WORLD"),   # spaces collapsed
+    ("café", "CAFE"),                   # accent stripped
+    ("well-being", "WELL-BEING"),       # hyphen preserved
+])
+def test_validate_normalize_valid_cases(...): ...
+
+@pytest.mark.parametrize("value", [
+    123, None, [], {},  # non-string types
+    "", "   ",          # empty
+    "dog!", "hello123", # bad characters
+    "a", "-", " - ",    # too short
+])
+def test_validate_normalize_invalid_cases(...): ...
+```
+
+---
+
+### 3. File-level validation: `_load` and friends
+
+Before individual words are even looked at, the file itself is validated (word_repository.py:35-58) — and note how **different failure levels use different tools**:
+
+```python
+if not self.file_path.exists():
+    raise FileNotFoundError(...)          # catastrophic: nothing can work
+
+try:
+    data = json.load(fh)
+except json.JSONDecodeError as exc:
+    raise ValueError(...) from exc        # catastrophic: file unreadable
+
+if isinstance(data, dict):
+    self._load_from_dict(data)
+elif isinstance(data, list):
+    self._load_from_list(data)
+else:
+    raise TypeError(...)                  # catastrophic: wrong structure
+```
+
+But *inside* the file, the strategy changes to **silent skipping**:
+
+```python
+def _load_from_dict(self, data: dict) -> None:
+    for raw_key, values in data.items():
+        if not isinstance(raw_key, str):
+            continue                      # skip bad key
+        key = raw_key.strip().upper()     # sanitize the key too!
+        if key not in self.EXPECTED_DIFFICULTIES:
+            continue                      # skip unknown difficulty
+        if not isinstance(values, list):
+            continue                      # skip bad bucket
+        for item in values:
+            self._add_if_valid(item, key) # skip bad words
+```
+
+This is an important design decision for beginners to notice: **a word bank with 1000 words and 3 typos should load with 997 words, not crash**. One bad entry shouldn't sink the whole file. (The docstring at word_repository.py:41 says exactly this: *"All invalid entries are skipped (silently)."*)
+
+Also note `"easy"`/`"  Easy  "` keys are sanitized with `.strip().upper()` before being checked against `EXPECTED_DIFFICULTIES` — so the file format is forgiving about casing and spacing.
+
+And `_add_if_valid` (word_repository.py:60-63) stores words in a **`set`**, which gives you deduplication for free:
+
+```python
+def test_load_from_list_deduplication(make_repo):
+    repo = make_repo(["apple", "Apple", "ápple", " apple "])
+    assert repo.normalized_words_by_diff["MEDIUM"] == {"APPLE"}
+```
+
+Four different raw strings collapse into one stored word. This is the study guide's *"preventing errors like word duplication"*: sanitization makes duplicates *detectable*, and the set makes them *impossible to store twice*.
+
+---
+
+### 4. The second wall: validation of live user input in `Game`
+
+The repository's docstring promises: *"All stored words satisfy `Game.set_word()` constraints"* (word_repository.py:15). That's **defense in depth** — two independent layers enforce the same rules, so a bug in one layer can't let garbage reach the game state.
+
+#### `Game.set_word` (game.py:46-66) — the moderator's secret word
+
+```python
+def set_word(self, raw_word: str) -> Dict[str, Any]:
+    if raw_word is None:
+        return {"ok": False, "error": "No word provided."}
+
+    word = raw_word.strip()
+    if len(word) == 0:
+        return {"ok": False, "error": "The word cannot be empty."}
+
+    letters_only = [ch for ch in word if ch.isalpha()]
+    if len(letters_only) < 2:
+        return {"ok": False, "error": "The word must contain at least two letters."}
+
+    if not all(ch.isalpha() or ch in {" ", "-"} for ch in word):
+        return {"ok": False, "error": "The word can only contain letters, spaces, or hyphens."}
+    ...
+```
+
+Same rules as the repository (empty, ≥2 letters, letters/spaces/hyphens only) — but notice a key difference in **how failures are reported** (section 5 below).
+
+#### `Game.guess_letter` (game.py:136-141) — a player's single-letter guess
+
+```python
+if not raw_letter or len(raw_letter.strip()) != 1 or not raw_letter.strip().isalpha():
+    return {
+        "ok": False,
+        "repeat": True,
+        "error": "Please provide a single alphabetic letter."
+    }
+```
+
+Three checks chained with `or`: not empty, exactly one character after trimming, and that character is a letter. So a player who types `"ab"`, `"7"`, or `"!"` gets a friendly prompt to retry instead of a crash or a silently-wrong game state.
+
+#### `Game.guess_word` (game.py:208-213) — the full-word guess
+
+```python
+if not raw_guess or not isinstance(raw_guess, str):
+    return {"ok": False, "repeat": True, "error": "Invalid guess."}
+
+guess = self._normalize(raw_guess.strip().upper())
+if not all(ch.isalpha() or ch in {" ", "-"} for ch in guess):
+    return {"ok": False, "repeat": True, "error": "Invalid input. Only letters allowed."}
+```
+
+Sanitize first (strip/upper), *then* validate the cleaned value.
+
+#### `Game.create_players` (game.py:104-121) — player names
+
+```python
+for name in names:
+    if not isinstance(name, str) or not name.strip():
+        return {"ok": False, "error": "Player names must be non-empty strings."}
+    cleaned.append(name.strip().title())
+
+lowered = [n.lower() for n in cleaned]
+if len(set(lowered)) != len(lowered):
+    return {"ok": False, "error": "Player names must be unique (case-insensitive)."}
+```
+
+Here you see sanitization doing real work: `"  carlos "` → `strip()` → `"carlos"` → `title()` → `"Carlos"`. And validation of **uniqueness across values** (not just a single value): `"Alice"` and `"alice"` collide, caught by comparing the set of lowered names.
+
+---
+
+### 5. The public API: validating arguments before doing work
+
+`get_by_difficulty` (word_repository.py:146-168) validates its parameter before touching any state:
+
+```python
+if not isinstance(difficulty, str):
+    raise TypeError("Difficulty must be a string.")
+
+key = difficulty.strip().upper()
+if key not in self.EXPECTED_DIFFICULTIES:
+    raise ValueError(f"Invalid difficulty: {difficulty!r}")
+...
+if not available:
+    raise ValueError(f"No unused words remaining for difficulty: {key}")
+```
+
+Three distinct failure modes, three distinct messages — a beginner-friendly rule: **each error the caller could make gets its own check and its own message**. And the input is sanitized (`"  easy "` works — see `test_get_by_difficulty_normalizes_input`, test_word_repository.py:223).
+
+---
+
+### 6. Three error-reporting styles in one codebase (big teaching point)
+
+Beginners often ask *"should I raise or return an error?"* — this project deliberately uses **all three styles, each where it fits**:
+
+| Style | Where | Why it fits |
+|---|---|---|
+| **Raise exceptions** (`FileNotFoundError`, `ValueError`, `TypeError`) | `WordRepository._load`, `get_by_difficulty` | Program-level failures. The caller *cannot* meaningfully continue — a missing file or bad difficulty is a bug/misconfiguration, not a user mistake. Fail fast. |
+| **Return a result dict** `{"ok": False, "error": "..."}` | `Game.set_word`, `guess_letter`, `guess_word`, `create_players` | User mistakes during play. The controller wants to **show the message and keep the loop running**, not crash. |
+| **Silently skip** | `_load_from_dict`, `_add_if_valid` | Bulk data (the JSON file). One bad line shouldn't destroy 999 good words. |
+
+The result-dict pattern also centralizes the state transition: the caller reads one structured answer and decides what to do, instead of catching five different exception types.
+
+---
+
+### 7. Key takeaways
+
+1. **Validate at the boundary, sanitize into a canonical form** — external data (files, keyboards) is the only place you need heavy checks; internally, you can trust the canonical form.
+2. **Whitelist, don't blacklist** — `ch.isalpha() or ch in {" ", "-"}` is future-proof; banning specific characters is not.
+3. **Sanitization enables deduplication** — `"Apple"`, `"ápple"`, `" apple "` are only detectable as the same word *after* normalization, and the `set` storage makes duplicates impossible.
+4. **Defense in depth** — the same rules (≥2 letters, allowed characters) are enforced in both `WordRepository` and `Game.set_word`, so no single bug corrupts game state.
+5. **Pick the error style by context** — exceptions for programmer errors, result dicts for user mistakes, skipping for bulk data.
+6. **Pin every rule with a test** — the parametrized valid/invalid tables in `test_word_repository.py:166-190` are the executable specification of exactly what "valid" means (including boundaries: 120 ok, 121 not).
