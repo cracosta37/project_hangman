@@ -2869,3 +2869,227 @@ i.e., "the first loop check says still playing, the second says over" — provin
 5. **The controller is just the edges of a state machine**: setup → play loop (driven by `is_game_over()`) → outcome → new round or exit.
 
 A good exercise: add a rule like "two players sharing the same name gets a bonus letter" and see how few places you need to touch — because every transition already funnels through the `Game` model.
+
+---
+---
+
+# 4. Data Handling & Input Processing
+
+## Topic 4.1 — Unicode Normalization & Accent Removal
+
+This is one of the most "invisible but critical" pieces of the project. It's implemented in two places and covered by a dedicated block of tests. Let's build it up from the problem it solves.
+
+---
+
+### 1. The problem it solves
+
+In hangman, a guess only counts if the typed character **equals** a character in the secret word. Look at the matching logic in `hangman/model/game.py:155`:
+
+```python
+positions = [i for i, l in enumerate(self.word) if l == letter]
+```
+
+That `==` is a strict character-by-character comparison. Now consider a word like `"café"`:
+
+- The `é` in `"café"` is **not** the letter `e`. It is a *different* Unicode code point.
+- If the word bank stores `CAFE` (accent stripped) but a player types `É`, or the word bank stores `CAFÉ` but the player types `E`, the strict comparison silently fails and the player loses a life for "missing" a letter that *visually looks the same*.
+
+The project's solution: **strip all accents from every word at load time, and normalize every player guess the same way.** Once both sides of the `==` comparison are in the same "canonical form", accent differences can never break matching. That is exactly what the study guide means by *"guessing 'a' matches 'á'."*
+
+---
+
+### 2. Background: how accented characters are stored
+
+The key insight for beginners: **a single accented letter can be one character or two, depending on how it was typed or encoded.**
+
+| Input | Code points | Description |
+|---|---|---|
+| `é` (precomposed) | `U+00E9` (1 code point) | A single "Latin small letter e with acute" glyph |
+| `e\u0301` (decomposed) | `U+0065` + `U+0301` (2 code points) | Base letter `e` + a *combining acute accent* that renders on top of it |
+
+Both display identically on screen, but `"é" == "e\u0301"` is `False` in Python. The same visual letter has **two different spellings in Unicode**.
+
+#### Normalization forms
+
+`unicodedata.normalize()` converts a string between these equivalent representations:
+
+- **NFD** (Normalisation form, Decomposed): breaks every precomposed character into *base + combining marks*. `é` → `e` + `U+0301`.
+- **NFC** (Composed): does the reverse — merges base + marks back into single precomposed characters where a precomposed form exists.
+- (NFKD/NFKC are the "compatibility" variants that also expand things like ligatures `ﬁ` → `fi` or `①` → `1`; not needed here.)
+
+#### Character categories
+
+After decomposition, the accent survives as a separate *combining mark* code point. `unicodedata.category(ch)` classifies every code point; diacritics like `U+0301` (combining acute accent) fall in category **`Mn`** — *Mark, non-spacing*. That gives us a clean, data-driven way to find and delete *all* accents in one pass, no matter which script they come from (Spanish `ñ`, French `ç`, German `ü`…):
+
+```python
+import unicodedata
+unicodedata.category("\u0301")   # 'Mn'
+unicodedata.category("e")        # 'Ll'  (letter, lowercase)
+unicodedata.category(" ")        # 'Zs'  (space)
+```
+
+---
+
+### 3. The implementation in this codebase
+
+#### The core method: `WordRepository._normalize_for_internal`
+
+`hangman/services/word_repository.py:122-141`:
+
+```python
+@staticmethod
+def _normalize_for_internal(text: str) -> str:
+    # NFD decomposition
+    decomposed = unicodedata.normalize("NFD", text)
+    # remove combining marks
+    filtered = "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
+    # collapse spaces and uppercase
+    collapsed = " ".join(filtered.split())
+    return collapsed.upper()
+```
+
+Four steps, in a deliberate order:
+
+1. **`unicodedata.normalize("NFD", text)`** — explode every precomposed accented character into base + mark.
+2. **Filter out `Mn` characters** — the generator expression `"".join(ch for ch in decomposed if ...)` keeps everything *except* combining marks, i.e. deletes every accent.
+3. **`" ".join(filtered.split())`** — a classic Python idiom: `split()` with no arguments splits on *any* whitespace (spaces, tabs, newlines) and drops empty pieces; joining with `" "` collapses `hello   world` / `hello\tworld` into a single clean space.
+4. **`.upper()`** — case-insensitive matching.
+
+> Note it's a `@staticmethod` with no `self`: it's a pure string function, which makes it trivially unit-testable (the tests call it directly as `WordRepository._normalize_for_internal(...)`).
+
+#### Step-by-step trace: `"café"`
+
+```python
+text       = "café"                    # c, a, f, é(U+00E9)          → 4 code points
+decomposed = unicodedata.normalize("NFD", text)
+#          = "cafe\u0301"              # c, a, f, e, U+0301          → 5 code points
+filtered   = "cafe"                    # U+0301 is 'Mn' → removed
+collapsed  = "cafe"                    # no whitespace to collapse
+result     = "CAFE"
+```
+
+#### A second, subtler trace: already-decomposed input
+
+The test suite includes `("e\u0301", "E")` (`tests/unit/test_word_repository.py:203`). This simulates a word bank file where `é` was *already stored decomposed* (base `e` + combining accent). The same two lines handle it perfectly — NFD is idempotent on already-decomposed text, and the `Mn` filter still removes the mark. **This is exactly why we normalize instead of writing an ad-hoc replace table like `text.replace("á", "a")`**: an ad-hoc table would only work for one representation and one language.
+
+And `("\u0301\u0301", "")` (line 204) shows the edge case: a string made *only* of combining marks normalizes to the empty string.
+
+---
+
+### 4. Where it plugs into the pipeline
+
+Normalization is the **last step of validation** for each word, at `word_repository.py:117`:
+
+```python
+def _validate_normalize(self, raw: object) -> str | None:
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    if len(text) > 120:
+        return None
+    # Validate allowed characters (letters incl. international, spaces, hyphens)
+    alpha_count = 0
+    for ch in text:
+        if ch.isalpha():
+            alpha_count += 1
+        elif ch in {" ", "-"}:
+            continue
+        else:
+            return None
+    if alpha_count < 2:
+        return None
+    return self._normalize_for_internal(text)      # ← accents die here, last
+```
+
+Notice the ordering: validation runs **before** accent removal, and it uses `ch.isalpha()`, which returns `True` for *any* Unicode letter — `é`, `ñ`, `ç` all pass. So international words are accepted, then reduced to their accent-free canonical form. (Also note the 120-char cap is checked on the pre-normalization length — fine for this use case.)
+
+The normalized result is what gets stored everywhere:
+
+- **`normalized_words_by_diff`** (line 26) — a `Dict[str, Set[str]]` of *normalized* words per difficulty. Because it's a `set`, normalization gives you **free deduplication across accent and case variants**. This is locked in by the test at `test_word_repository.py:127-129`:
+
+  ```python
+  def test_load_from_list_deduplication(make_repo):
+      repo = make_repo(["apple", "Apple", "ápple", " apple "])
+      assert repo.normalized_words_by_diff["MEDIUM"] == {"APPLE"}
+  ```
+
+  Four different spellings of the same word → one entry.
+
+- **`used_words`** (line 28, comment: *"stores normalized forms (canonical) for dedup & no-repeat"*) — the session no-repeat set also stores the canonical form, so `"café"` and `"cafe"` count as the *same* word and can't both be played in one session (`get_by_difficulty`, line 159-167).
+
+---
+
+### 5. The matching side: `Game._normalize`
+
+The repository guarantees the *word* is accent-free. The *guess* is normalized too, in `hangman/model/game.py:34-40`:
+
+```python
+def _normalize(self, text: str) -> str:
+    text = text or ""
+    if not self.normalize_input:
+        return text.upper()
+    normalized = unicodedata.normalize("NFD", text)
+    filtered = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+    return filtered.upper()
+```
+
+This is the same NFD + `Mn`-filter recipe (a small, deliberate duplication — the `Game` model must stay independent of the `WordRepository` service, per the project's separation of concerns). It's applied to every letter guess at `game.py:143`:
+
+```python
+letter = self._normalize(raw_letter.strip().upper())
+```
+
+so in `guess_letter` the comparison `l == letter` (line 155) always compares two canonical forms:
+
+- word side: `CAFE` (stripped at load time by the repository)
+- guess side: a player typing `é` → NFD → `e` + `Mn` → filter → `E` → matches the `E` in the word. ✓
+
+There's a toggle: `Game.__init__` takes `normalize_input` (line 11). When `False`, the game keeps accented letters as first-class letters — the letter pool grows from 26 to include `ÑÁÉÍÓÚÜÇ` (lines 26-27), and `_normalize` only uppercases. This is the "international mode" variant; the default (`True`) is the accent-stripping mode described in the study guide.
+
+---
+
+### 6. Test coverage (what the suite proves)
+
+From `tests/unit/test_word_repository.py`:
+
+**Direct unit tests of the normalization function** (lines 196-207), parametrized:
+
+```python
+@pytest.mark.parametrize("input_text,expected", [
+    ("hello", "HELLO"),                             # Simple case
+    ("  hello   world  ", "HELLO WORLD"),           # Leading/trailing/multiple spaces
+    ("café", "CAFE"),                               # Accents removed
+    ("Árbol Niño", "ARBOL NINO"),                   # Multiple accented words
+    ("hello\tworld\npython", "HELLO WORLD PYTHON"), # Tabs/newlines → spaces
+    ("well-being", "WELL-BEING"),                   # Hyphens preserved
+    ("e\u0301", "E"),                               # Already-decomposed accent
+    ("\u0301\u0301", ""),                           # Combining characters only
+])
+def test_normalize_for_internal(input_text, expected):
+    assert WordRepository._normalize_for_internal(input_text) == expected
+```
+
+**Idempotency** (lines 210-212) — normalizing an already-normalized string changes nothing. This property is what makes it safe to normalize data at load time *and* again on every guess:
+
+```python
+def test_normalize_for_internal_idempotent():
+    text = "HELLO WORLD"
+    assert WordRepository._normalize_for_internal(text) == text
+```
+
+**Behavioral tests through the public API** — `("café", "CAFE")` also appears in `test_validate_normalize_valid_cases` (line 170), proving the full load path produces `CAFE`.
+
+---
+
+### 7. Key takeaways for a beginner
+
+1. **Accented letters are code points, not "letters with decorations."** `é` ≠ `e` + anything in a raw comparison; you must transform both sides into a common form.
+2. **NFD + removing `Mn` is the standard, locale-independent accent-stripping recipe.** It works for any language's diacritics without a hardcoded replacement table.
+3. **Normalize at the boundary** (when data enters the system) so the rest of the program can assume one canonical form — here: uppercase, accent-free, single-spaced.
+4. **Normalization buys you deduplication for free** when storage is a `set` (`"Apple"`, `"ápple"`, `" apple "` → one `APPLE`).
+5. **Order matters:** decompose *before* filtering (or precomposed accents are invisible to the `Mn` filter), and filter marks *before* uppercasing.
+6. **Idempotency is a design goal** — the function can be applied repeatedly (load time + guess time) without drifting.
+
+One honest caveat worth knowing: this recipe removes only `Mn` (non-spacing marks). Marks in other categories (`Mc` — spacing combining marks used by Devanagari/Thai — or `Me` — enclosing marks) would survive. For a Latin-alphabet word game, `Mn` is exactly right and the project documents its scope accordingly.
