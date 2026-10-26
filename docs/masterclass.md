@@ -3350,3 +3350,273 @@ The result-dict pattern also centralizes the state transition: the caller reads 
 4. **Defense in depth** — the same rules (≥2 letters, allowed characters) are enforced in both `WordRepository` and `Game.set_word`, so no single bug corrupts game state.
 5. **Pick the error style by context** — exceptions for programmer errors, result dicts for user mistakes, skipping for bulk data.
 6. **Pin every rule with a test** — the parametrized valid/invalid tables in `test_word_repository.py:166-190` are the executable specification of exactly what "valid" means (including boundaries: 120 ok, 121 not).
+
+---
+---
+
+## Topic 4.3 — Session-Level No-Repeat
+
+The study guide summarizes this topic in one line:
+
+> *Tracking previously used words using a `used_words` set inside `WordRepository` to prevent displaying the same word twice in a single session.*
+
+Let's unpack what that means, why it's built the way it is, and see it in action with the real code.
+
+---
+
+### 1. The problem it solves
+
+When the game picks a word **automatically** (word source option `2`), it uses `random.choice`. If we just picked randomly from the whole bucket every round, the player could get:
+
+```
+Round 1: DOG
+Round 2: DOG   ← feels broken, and is unfair in a competitive game
+Round 3: DOG
+```
+
+The fix: remember every word the repository has already handed out, and only pick from the words it **hasn't** handed out yet. That memory is the `used_words` set.
+
+---
+
+### 2. What "session" means here
+
+A *session* is the lifetime of one `WordRepository` object. Look at where it's created — `hangman/controller/game_controller.py:22`:
+
+```python
+def __init__(self, view: ConsoleView, constants_module):
+    ...
+    self.word_repo = WordRepository(BASE_DIR / "data" / "word_bank.json")
+```
+
+The controller is created **once** per program run (in `run.py`), so the repository — and its `used_words` set — survives across **all rounds** of that run. The no-repeat rule therefore spans the whole play session:
+
+- Round 1 uses `DOG` → round 2 can never be `DOG` again, even though it's a "new game".
+- The only ways to clear the memory are: **quitting the program** (new process → new repository) or calling **`reset_session()`** explicitly.
+
+That's exactly what "session-level" means: not per-round, not forever — per program run, with a manual escape hatch.
+
+---
+
+### 3. The three pieces of code
+
+All of the logic lives in `hangman/services/word_repository.py`. The class docstring even lists it as a formal guarantee (line 17):
+
+```python
+class WordRepository:
+    """
+    Loads, validates, normalizes, and serves words/phrases.
+
+    Guarantees:
+    - All stored words satisfy Game.set_word() constraints
+    - All internal storage is normalized
+    - No-repeat enforced at session level
+    """
+```
+
+#### Piece 1 — the memory itself (`__init__`, lines 23–30)
+
+```python
+def __init__(self, file_path: Union[str, Path]):
+    self.file_path = Path(file_path).resolve()
+    # Normalized words by difficulty
+    self.normalized_words_by_diff: Dict[str, Set[str]] = {diff: set() for diff in self.EXPECTED_DIFFICULTIES}
+    # used_words stores normalized forms (canonical) for dedup & no-repeat
+    self.used_words: Set[str] = set()
+
+    self._load()
+```
+
+Two important details:
+
+- `used_words` starts **empty** — a fresh session has no history.
+- The comment says it stores **normalized forms**. This is deliberate and connects to topic 4.1: the word bank is stored in canonical form (uppercased, accents stripped, spaces collapsed). If we stored raw forms instead, `"café"` and `"CAFE"` would look like *different* words and the no-repeat rule would silently fail.
+
+#### Piece 2 — the enforcement (`get_by_difficulty`, lines 146–168)
+
+```python
+def get_by_difficulty(self, difficulty: str) -> str:
+    ...
+    key = difficulty.strip().upper()
+    if key not in self.EXPECTED_DIFFICULTIES:
+        raise ValueError(f"Invalid difficulty: {difficulty!r}")
+
+    available = self.normalized_words_by_diff[key] - self.used_words
+
+    if not available:
+        # No unused words remaining in this bucket. Raise a descriptive error.
+        raise ValueError(f"No unused words remaining for difficulty: {key}")
+
+    selection = random.choice(tuple(sorted(available)))
+    # Mark selected as used (store normalized form)
+    self.used_words.add(selection)
+    return selection
+```
+
+Three steps, in order:
+
+1. **Compute the available pool** with a *set difference*:
+   `available = bucket - used_words`.
+   This is a pure computation — it does **not** remove anything from the word bank. The bucket stays intact; we just look at what's left.
+2. **Fail loudly if the pool is empty** with a descriptive `ValueError`. Note the exact message `"No unused words remaining"` — the controller later greps for that string (more below).
+3. **Pick and mark**: choose randomly, then `self.used_words.add(selection)`. The marking happens *after* the pick, so the word is excluded from the *next* call.
+
+#### Piece 3 — the escape hatch (`reset_session`, lines 170–172)
+
+```python
+def reset_session(self) -> None:
+    """Clear session-level used-word cache."""
+    self.used_words.clear()
+```
+
+One line: wipe the history. The word bank itself is untouched, so every word becomes eligible again.
+
+---
+
+### 4. Walkthrough with the real word bank
+
+`hangman/data/word_bank.json` has 5 EASY words: `dog, tree, sun, house, python`. After loading and normalizing, the EASY bucket is `{"DOG", "TREE", "SUN", "HOUSE", "PYTHON"}`.
+
+| Round | Call | `available` (bucket − used) | Result | `used_words` after |
+|---|---|---|---|---|
+| 1 | `get_by_difficulty("EASY")` | all 5 | e.g. `DOG` | `{DOG}` |
+| 2 | `get_by_difficulty("EASY")` | 4 (no DOG) | e.g. `SUN` | `{DOG, SUN}` |
+| 3 | … | 3 | … | 3 words |
+| 4 | … | 2 | … | 4 words |
+| 5 | … | 1 | the last one | 5 words |
+| 6 | … | `∅` | **`ValueError: No unused words remaining for difficulty: EASY`** | 5 words |
+
+So with a 5-word bucket you get exactly 5 distinct words per session — then the repository *refuses* to repeat, and the error is the signal that tells the controller to offer recovery options.
+
+---
+
+### 5. Why a `set`? (and why `sorted`?)
+
+- **`set` for `used_words`**: membership checks (`x in used_words`) are O(1), and a set can never contain duplicates — which is exactly the semantics we want ("has this word been used? yes/no"). A list would work but be slower and would need extra dedup logic.
+- **`tuple(sorted(available))`**: `random.choice` needs a *sequence* (a set isn't indexable), and `sorted` makes the candidate list deterministic. That determinism is what lets tests mock `random.choice` and reason about exact outcomes — see `test_get_by_difficulty_mocked_random` in `tests/unit/test_word_repository.py:277`.
+
+---
+
+### 6. How the controller drives it
+
+The controller never touches `used_words` directly — it only calls the two public methods. There are **three** interaction points in `hangman/controller/game_controller.py`:
+
+#### a) The reset prompt between rounds (lines 53–60, 380–383)
+
+After each finished round, `start()` asks:
+
+```python
+def choose_reset_session(self) -> bool:
+    while True:
+        choice = self.view.prompt(
+            "Reset word history for the new game? (Y/N): "
+        ).strip().upper()
+        if choice in ("Y", "N"):
+            return choice == "Y"
+        self.view.display("Invalid input. Please choose Y or N.\n")
+```
+
+and in the round loop:
+
+```python
+# Optionally reset word session cache (NO-REPEAT MODE)
+reset_words = self.choose_reset_session()
+if reset_words:
+    self.word_repo.reset_session()
+```
+
+So the player has a choice: keep the no-repeat memory (harder, more variety) or clear it (words can repeat).
+
+#### b) Exhaustion recovery (lines 398–429)
+
+When the automatic picker runs out of words, the `ValueError` from the repository is caught and turned into a menu:
+
+```python
+except ValueError as e:
+    if self._is_exhaustion_error(e):
+        self.view.display(
+            f"{e}\n"
+            "Recovery options:\n"
+            "1) Reset word history for this session\n"
+            "2) Choose a different difficulty\n"
+            "3) Exit game\n"
+        )
+        choice = self.view.get_choice(["1", "2", "3"])
+
+        if choice == "1":
+            self.word_repo.reset_session()
+            continue
+        ...
+```
+
+where the exhaustion check is just a string match on the repository's error message (lines 62–63):
+
+```python
+def _is_exhaustion_error(self, error: ValueError) -> bool:
+    return "No unused words remaining" in str(error)
+```
+
+This is a nice example of the repository *owning* the rule and the controller *reacting* to it: the repository says "I can't give you a word", and the controller decides what to do about it.
+
+#### c) A nuance worth knowing
+
+Manual word entry (source `1`, the moderator types a secret word via `prompt_hidden`) goes straight to `game.set_word(...)` and **bypasses the repository entirely** — so manually entered words are neither checked against nor added to `used_words`. No-repeat applies only to the automatic picker.
+
+---
+
+### 7. The tests that pin this behavior
+
+`tests/unit/test_word_repository.py`:
+
+**The word gets marked as used** (lines 227–229):
+```python
+def test_get_by_difficulty_marks_used(repo_with_words):
+    word = repo_with_words.get_by_difficulty("easy")
+    assert word in repo_with_words.used_words
+```
+
+**No repeats** (lines 232–237) — the fixture has exactly two EASY words (`cat`, `dog`), so two draws must yield both, as a set:
+```python
+def test_get_by_difficulty_no_repeats(repo_with_words):
+    results = {
+        repo_with_words.get_by_difficulty("easy"),
+        repo_with_words.get_by_difficulty("easy")
+    }
+    assert results == {"CAT", "DOG"}
+```
+
+**Exhaustion** (lines 240–244) — a one-word bucket works once, then raises:
+```python
+def test_get_by_difficulty_exhaustion(repo_single_word):
+    repo_single_word.get_by_difficulty("easy")
+
+    with pytest.raises(ValueError):
+        repo_single_word.get_by_difficulty("easy")
+```
+
+And at the controller level, `tests/unit/test_game_controller.py` verifies the reset decision with a **mocked** repository (this is where the Repository pattern pays off — the mock only needs to know `get_by_difficulty` and `reset_session`):
+
+```python
+def test_start_resets_word_session(controller_factory):
+    ...
+    view.prompt.side_effect = ["Y", "Y", "1", "word", "N"]  # continue, reset=Y, ...
+    controller.start()
+    controller.word_repo.reset_session.assert_called()
+
+def test_start_continue_without_reset(controller_factory):
+    ...
+    view.prompt.side_effect = ["Y", "N", "1", "word", "N"]  # continue, reset=N, ...
+    controller.start()
+    controller.word_repo.reset_session.assert_not_called()
+```
+
+---
+
+### 8. Key takeaways
+
+1. **State lives with the data.** The "don't repeat words" rule is enforced entirely inside `WordRepository`. The controller and the `Game` model never track used words — they just ask, and the repository refuses to repeat. That's encapsulation and SRP in action.
+2. **A `set` is the natural data structure** for "things I've already seen": O(1) checks, no duplicates, and set difference (`bucket - used`) computes the available pool in one expression.
+3. **Normalize before you compare.** Storing canonical forms in `used_words` means `"café"`, `"CAFE"`, and `"cafe"` are all recognized as the *same* word — no-repeat and accent-insensitivity (topic 4.1) compose cleanly.
+4. **Finite resources need a failure path and a recovery path.** The word bank is finite, so the code defines what "out of words" looks like (a descriptive `ValueError`) and what the user can do about it (reset / switch difficulty / exit).
+5. **"Session" is just object lifetime.** No global state, no persistence — the history exists as long as the repository object exists, and `reset_session()` is the explicit way to end it early.
+
+A good exercise to try: add a test that builds a repo from `{"easy": ["café", "CAFE"]}` and asserts that `get_by_difficulty("easy")` raises `ValueError` on the *first* call — because normalization collapses both entries into one word, so the bucket has only one usable word. That test would prove the no-repeat rule and the normalization rule work together.
