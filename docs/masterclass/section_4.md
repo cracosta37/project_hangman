@@ -745,3 +745,269 @@ def test_start_continue_without_reset(controller_factory):
 5. **"Session" is just object lifetime.** No global state, no persistence — the history exists as long as the repository object exists, and `reset_session()` is the explicit way to end it early.
 
 A good exercise to try: add a test that builds a repo from `{"easy": ["café", "CAFE"]}` and asserts that `get_by_difficulty("easy")` raises `ValueError` on the *first* call — because normalization collapses both entries into one word, so the bucket has only one usable word. That test would prove the no-repeat rule and the normalization rule work together.
+
+---
+---
+
+## Topic 4.4 — Configuration Externalization
+
+The study guide summarizes this topic in one line:
+
+> *Moving constant values like maximum health and ASCII hangman graphics into a standalone `constants.py` module rather than scatter-storing them within classes.*
+
+Let's unpack what that means, why it's built the way it is, and see it in action with the real code.
+
+---
+
+### 1. The concept in one sentence
+
+**Configuration externalization** means pulling the *values that define how the app behaves* (max health, the ASCII art, difficulty levels…) out of the classes that use them, and placing them in a dedicated, standalone module — so that **behavior** (logic) and **configuration** (data) can change independently.
+
+The key distinction to hold onto:
+
+| Kind of thing | Question it answers | Example in this project |
+|---|---|---|
+| **Behavior (logic)** | *"What does the program do?"* | `Game.guess_letter` applies the rules; `Player.lose_health` decrements health |
+| **Configuration (data)** | *"How is the program tuned?"* | `MAX_HEALTH = 7`, the `HANGMAN` ASCII frames |
+
+Once configuration lives in its own module, you can change *how the game is tuned* without ever touching *what the game does*.
+
+---
+
+### 2. The anti-pattern: what the code would look like *without* it
+
+Imagine the "naive" version of this project. The magic values would be scattered inside the classes:
+
+```python
+# ❌ BAD: configuration scattered inside behavior
+class Player:
+    def __init__(self, name):
+        self.name = name
+        self.max_health = 7          # magic number, buried in the model
+
+class ConsoleView:
+    def show_health(self, player):
+        if player.health == 7:
+            print("     _______\n    |       | ...")   # 8 giant ASCII blocks
+        elif player.health == 6:
+            print("     _______\n    |       | ...")   # copy-pasted, slightly different
+        ...
+```
+
+Problems with this:
+
+1. **Magic numbers** — where did `7` come from? You have to open the class to find out.
+2. **Change amplification** — to make the game harder (5 lives instead of 7), you'd edit `Player`, *and* every `if/elif` branch in the view, *and* any test that hardcodes 7.
+3. **Untestable** — a unit test for `Player` is forced to use 7 lives even when it wants to test "a player with 1 life" cheaply.
+4. **Hidden coupling** — the view now *knows* the exact health values, so model and view are welded together.
+
+---
+
+### 3. How this project does it — file by file
+
+#### Step 1 — the standalone configuration module: `hangman/constants.py`
+
+All tunable values live in one small, dependency-free module:
+
+```python
+# hangman/constants.py:1-2
+MAX_HEALTH = 7
+HANGMAN = [
+    """     _______
+    |       |
+    |       O
+    ...
+    |      / \ """,
+    ...   # 8 frames total, from "complete figure" down to "empty gallows"
+]
+```
+
+Two things to notice:
+
+- `MAX_HEALTH = 7` — the single source of truth for how many lives a player has.
+- `HANGMAN` is a **list of 8 strings** (indices 0–7). Index 0 is the fully drawn figure; index 7 is the empty gallows. The list is ordered from *most drawn* to *least drawn*.
+
+#### Step 2 — the composition root wires it in: `run.py`
+
+`run.py` is the **only** place in the whole project that imports the real constants module. It's the "composition root" — the single spot where real dependencies are assembled:
+
+```python
+# run.py:3, 6-9
+from hangman import constants
+
+def run():
+        view = ConsoleView()
+        controller = GameController(view=view, constants_module=constants)
+        controller.start()
+```
+
+Note that the **module itself** is passed as a value (`constants_module=constants`), not individual numbers. The module acts as a *namespace object* bundling all configuration together.
+
+#### Step 3 — the controller receives and forwards it: `game_controller.py`
+
+```python
+# game_controller.py:16-18
+def __init__(self, view: ConsoleView, constants_module):
+    self.view = view
+    self.c = constants_module          # stored, never imported
+```
+
+```python
+# game_controller.py:73
+self.game = Game(constants_module=self.c, normalize_input=normalize)
+```
+
+The controller never does `from hangman import constants`. It just carries the configuration it was given and hands it to the model. This is **dependency injection** applied to configuration — exactly the same mechanism used for the `view` (topic 1.3).
+
+#### Step 4 — the model consumes it: `game.py`
+
+```python
+# game.py:11-12
+def __init__(self, constants_module, normalize_input: bool = True):
+    self.c = constants_module
+```
+
+```python
+# game.py:118
+self.players = [Player(n, self.c.MAX_HEALTH, self.c.HANGMAN) for n in cleaned]
+```
+
+This is the key line: `Player(n, self.c.MAX_HEALTH, self.c.HANGMAN)`. The `Game` reads the configuration through the injected object and **decomposes it into plain values** before passing them down.
+
+#### Step 5 — the leaf class knows nothing about configuration: `player.py`
+
+```python
+# player.py:7-11
+def __init__(self, name: str, max_health: int, hangman_states: List[str]):
+    self.name = name
+    self.max_health = max_health
+    self.health = max_health
+    self.hangman_states = hangman_states
+```
+
+`Player` has **no idea** that `constants.py` exists. It just receives an integer and a list. It's fully generic — you could build a `Player` for a completely different game with 3 lives and emoji "health bars".
+
+#### Step 6 — the view reads the data through the model: `console_view.py`
+
+```python
+# console_view.py:52-54
+def show_health(self, player) -> None:
+    print(player.hangman_states[player.health])
+    print()
+```
+
+The view doesn't import `constants` either. It simply indexes the list that the player carries, using the player's current health as the index. The graphics are **data flowing through the model**, not logic hardcoded in the view.
+
+---
+
+### 4. The full flow of the configuration
+
+```
+constants.py  (MAX_HEALTH=7, HANGMAN[8 frames])
+     │  imported once
+     ▼
+run.py  ──────────────►  GameController(constants_module=constants)
+     (composition root)        │  self.c
+                               ▼
+                        Game(constants_module=self.c)
+                               │  self.c.MAX_HEALTH, self.c.HANGMAN
+                               ▼
+                        Player(max_health, hangman_states)
+                               │  player.hangman_states[player.health]
+                               ▼
+                        ConsoleView.show_health(player)
+```
+
+Every arrow is a **parameter**, never an import. Only the top of the chain touches the real module.
+
+---
+
+### 5. The payoff: tests with *different* configurations
+
+This is where externalization really shines. Because every class accepts configuration as a parameter, the test suite can run the game with entirely different rules:
+
+**`tests/unit/test_game.py:9-19`** — a fake constants module with 3 lives instead of 7:
+
+```python
+class DummyConstants:
+    MAX_HEALTH = 3
+    HANGMAN = ["H", "A", "N", "G", "M", "A", "N"]
+
+@pytest.fixture
+def constants():
+    return DummyConstants()
+
+@pytest.fixture
+def game(constants):
+    return Game(constants)
+```
+
+The tests exercise `Game` with a 3-life configuration **without ever touching the real `constants.py`**.
+
+**`tests/unit/test_game_controller.py:69`** — the controller doesn't even need real values, so a bare `Mock()` suffices:
+
+```python
+controller = GameController(view=view, constants_module=Mock())
+```
+
+**`tests/unit/test_player.py:9-25`** — the factory fixture builds players with whatever health the test wants:
+
+```python
+def _make_player(name="Alice", max_health=5, hangman_states=None):
+    ...
+    return Player(name=name, max_health=max_health, hangman_states=hangman_states)
+```
+
+**`tests/integration/test_run.py:79-82`** — even the wiring itself is verified: the integration test asserts that `run()` passes the *real* module through:
+
+```python
+assert "constants_module" in kwargs
+assert kwargs["constants_module"] is run_module.constants
+```
+
+Notice a subtle consequence: because the parameter is typed as a plain `constants_module` (no type annotation), **anything with `MAX_HEALTH` and `HANGMAN` attributes works** — the real module, `DummyConstants`, or a `Mock`. That's duck typing doing its job (topic 1.5), and it's what makes all of the above possible.
+
+---
+
+### 6. A subtle detail worth understanding: the 8 frames vs. 7 lives
+
+`MAX_HEALTH = 7` but `HANGMAN` has **8** entries. Why? Because the index used is the *current* health, which ranges from `7` (full) down to `0` (dead):
+
+| `player.health` | frame shown | figure state |
+|---|---|---|
+| 7 (new player) | `HANGMAN[7]` | empty gallows |
+| 5 | `HANGMAN[5]` | head only |
+| 3 | `HANGMAN[3]` | head + torso + one arm |
+| 1 | `HANGMAN[1]` | nearly complete |
+| 0 (eliminated) | `HANGMAN[0]` | complete figure |
+
+So the figure is drawn *as the player loses health*, and the list is ordered from most-drawn (index 0) to least-drawn (index 7). The hidden invariant is:
+
+```
+len(HANGMAN) >= MAX_HEALTH + 1
+```
+
+If someone changed `MAX_HEALTH` to 10 without adding frames, `player.hangman_states[player.health]` would raise an `IndexError` at runtime. This is a classic "gotcha" of externalized configuration: **the values in the config module must stay consistent with each other**, and a single module at least makes that consistency visible in one place.
+
+---
+
+### 7. Why this design is good (summary)
+
+| Benefit | Where you see it |
+|---|---|
+| **Single source of truth** | Change `MAX_HEALTH` in one file; `Game`, `Player`, and the view all follow automatically. |
+| **Testability** | `DummyConstants` (3 lives), `Mock()`, and `max_health=5` in fixtures — tests run with arbitrary configurations. |
+| **Loose coupling** | `Player`, `Game`, `ConsoleView` never import `constants.py`; they only receive values. |
+| **Swappable configurations** | You could create `constants_hard.py` with `MAX_HEALTH = 5` and swap it in `run.py` without editing a single class. |
+| **Consistency with DI** | Configuration is injected exactly like the `view` — one uniform mechanism for "things this component needs from outside". |
+
+---
+
+### 8. Key takeaways
+
+1. **Configuration is data, not logic.** Keep it in a dedicated module (`constants.py`) so it can be read, changed, and swapped without touching behavior.
+2. **Inject, don't import.** Only the composition root (`run.py`) imports the real module; everything downstream receives it as a constructor parameter.
+3. **Decompose at the boundary.** `Game` converts the module into plain values (`self.c.MAX_HEALTH`) before passing them to `Player`, so leaf classes stay completely generic.
+4. **The test suite is the proof.** The ability to run the same `Game` logic with 3 lives, 5 lives, or a `Mock` is the direct, measurable benefit of externalizing the configuration.
+
+A good exercise to try: create a second constants module (e.g., `MAX_HEALTH = 5` with 6 frames) and run the game with it from a modified `run.py` — you'll see firsthand that no class needed any changes.
