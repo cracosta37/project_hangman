@@ -398,3 +398,391 @@ Together these are what let the suite stay DRY: the initialization logic for a `
 5. Write a new semantic fixture `injured_player` (a player with exactly 2 health) in a scratch copy of `test_player.py`, built on `make_player`, and use it in one test.
 
 **One-line summary:** A pytest fixture is a named, pytest-managed setup function that tests request by parameter name — this project combines **semantic fixtures** (pre-built states like `dead_player`), **factory fixtures** (`make_player`, `view_factory`), and **composition chains** (`constants → game → game_with_players → prepared_game`) so every test's setup is written once, reused everywhere, and rebuilt fresh for each test.
+
+---
+---
+
+## Topic 5.2 — Parametrized Tests
+
+### 1. What the study guide says
+
+> **Parametrized Tests:** Using `@pytest.mark.parametrize` to run the same assertion logic against multiple sets of inputs and expected outcomes (e.g., testing letter guessing boundaries or constructor constraints).
+
+In plain terms: a parametrized test is **one test function that pytest runs N times**, once per row of data you supply. The test *logic* stays identical; only the *inputs* (and expected results) change.
+
+#### The problem it solves
+
+Without parametrization, testing 5 different health values in `Player.lose_health()` would mean writing 5 nearly identical test functions:
+
+```python
+def test_lose_health_from_5(player): ...   # copy-paste
+def test_lose_health_from_2(player): ...   # copy-paste
+def test_lose_health_from_1(player): ...   # copy-paste
+# ...
+```
+
+That violates DRY, and when a bug appears you get 5 vague failures. With parametrization, you write the logic **once** and declare the data as a table.
+
+---
+
+### 2. The syntax
+
+```python
+@pytest.mark.parametrize(
+    "param1, param2",          # ← names of the parameters (comma-separated string)
+    [
+        (value1a, value2a),    # ← row 1: one test case
+        (value1b, value2b),    # ← row 2: another test case
+    ]
+)
+def test_something(param1, param2):
+    # body runs once per row
+```
+
+Key rules:
+
+- The **string** lists parameter names; they become extra arguments of the test function.
+- The **list** contains one tuple per test case. With a single parameter, each row is just a value (no tuple needed).
+- Pytest expands the function into **one test per row**, each with its own ID, e.g. `test_lose_health_behavior[5-4-False]`.
+- Fixtures still work normally — parametrized arguments and fixtures can be mixed freely.
+
+You can verify the expansion yourself with:
+
+```bash
+pytest tests/unit/test_player.py --collect-only
+```
+
+---
+
+### 3. Examples from the codebase, by pattern
+
+The codebase uses parametrization in **9 distinct patterns** (27 `@pytest.mark.parametrize` decorators across 7 test files). Let's walk through each.
+
+#### Pattern A — Constructor constraints (multiple parameters)
+
+`tests/unit/test_player.py:53-67`:
+
+```python
+@pytest.mark.parametrize(
+    "name, max_health, states",
+    [
+        ("Alice", 5, ["s1", "s2"]),         # Valid case with custom states
+        ("Player_123", 4, ["a", "b", "c"]), # Valid case with different name and states
+        ("Bob", 1, []),                     # Valid case with empty states list
+    ]
+)
+def test_constructor_initializes_attributes(make_player, name, max_health, states):
+    player = make_player(name=name, max_health=max_health, hangman_states=states)
+
+    assert player.name == name
+    assert player.max_health == max_health
+    assert player.health == max_health
+    assert player.hangman_states == states
+```
+
+This is the "constructor constraints" example the study guide mentions. Notice the important combination: **parametrize supplies the data, the factory fixture `make_player` supplies the setup** (see Topic 5.1, Pattern B). The test body is written once and runs 3 times, verifying that `Player.__init__` (in `hangman/model/player.py:7`) stores every attribute correctly — including the edge case of an *empty* states list.
+
+#### Pattern B — Boundary values (the classic use case)
+
+`tests/unit/test_player.py:87-105`:
+
+```python
+@pytest.mark.parametrize(
+    "initial_health, expected_health, expected_return",
+    [
+        (5, 4, False),  # Valid case with more than 1 health
+        (2, 1, False),  # Valid case with exactly 2 health
+        (1, 0, True),   # Valid case with exactly 1 health (transition to zero)
+        (0, 0, False),  # Valid case with already zero health (should not go negative)
+        (-1, 0, False), # Valid case with negative health (should be treated as zero)
+    ]
+)
+def test_lose_health_behavior(make_player, initial_health, expected_health, expected_return):
+    player = make_player(max_health=initial_health)
+    player.health = initial_health
+
+    result = player.lose_health()
+
+    assert player.health == expected_health
+    assert result is expected_return
+```
+
+This is the "letter guessing boundaries" style of test the guide refers to. Look at *why* these 5 rows were chosen — they are the **boundaries** of the logic in `Player.lose_health()` (`hangman/model/player.py:13-16`):
+
+```python
+def lose_health(self) -> bool:
+    previous = self.health
+    self.health = max(0, self.health - 1)
+    return previous > 0 and self.health == 0
+```
+
+| Row | What it pins down |
+|---|---|
+| `5 → 4` | Normal decrement, no special behavior |
+| `2 → 1` | One step above the critical boundary |
+| `1 → 0` | **The transition to zero** — the only case where the method returns `True` |
+| `0 → 0` | The `max(0, ...)` floor: health must never go negative |
+| `-1 → 0` | Defensive: even corrupted negative state is clamped to 0 |
+
+Boundary testing is the single most valuable application of `parametrize`: bugs almost always hide at the edges (`0`, `1`, negative, empty), and a table makes it impossible to "forget" an edge.
+
+The same file has a third example (lines 122–135), `test_is_alive`, parametrizing `health` over `(5, 3, 1, 0)` to pin down that `is_alive()` is `True` for any positive health and `False` exactly at zero.
+
+#### Pattern C — Input → output tables (normalization)
+
+`tests/unit/test_game.py:52-64`:
+
+```python
+@pytest.mark.parametrize(
+    "input_text, expected",
+    [
+        (None, ""),                                 # None input
+        ("hello", "HELLO"),                         # Basic lowercase
+        ("canción", "CANCION"),                     # Accented characters
+        ("áéíóú", "AEIOU"),                         # Multiple accents
+        ("hola-mundo feliz", "HOLA-MUNDO FELIZ"),   # Phrase with hyphen and space
+        (" Árbol-azúl ", " ARBOL-AZUL "),           # Leading/trailing whitespace
+    ],
+)
+def test_normalization(game, input_text, expected):
+    assert game._normalize(input_text) == expected
+```
+
+This is a **table-driven test**: each row is an `(input, expected_output)` pair for `Game._normalize()` (`hangman/model/game.py:34`). One row per *behavioral category* (None, case, accents, phrases, whitespace) — not one row per possible string. That's the right granularity: you're covering the *kinds* of input, not enumerating the universe.
+
+The most thorough version in the project is `test_normalize_for_internal` in `tests/unit/test_word_repository.py:196-207`, which adds the tricky Unicode cases:
+
+```python
+@pytest.mark.parametrize("input_text,expected", [
+    ("hello", "HELLO"),
+    ("  hello   world  ", "HELLO WORLD"),
+    ("café", "CAFE"),
+    ("Árbol Niño", "ARBOL NINO"),
+    ("hello\tworld\npython", "HELLO WORLD PYTHON"),
+    ("well-being", "WELL-BEING"),
+    ("e\u0301", "E"),            # combining acute accent
+    ("\u0301\u0301", ""),        # combining characters only
+])
+def test_normalize_for_internal(input_text, expected):
+    assert WordRepository._normalize_for_internal(input_text) == expected
+```
+
+The last two rows are especially valuable: they test the NFD decomposition logic (topic 4.1 of the guide) at the byte level, including the degenerate case of *only* combining marks, which must normalize to an empty string.
+
+#### Pattern D — Invalid inputs (single parameter, shared assertion)
+
+`tests/unit/test_game.py:78-85`:
+
+```python
+@pytest.mark.parametrize(
+    "word",
+    [None, "   ", "A", "HELLO!"], # Invalid inputs: None, empty, single letter, invalid character
+)
+def test_set_word_invalid_inputs(game, word):
+    result = game.set_word(word)
+
+    assert result["ok"] is False
+```
+
+Here there's only **one parameter and no per-row expected value**, because every row must produce the *same* outcome: rejection. This is the most compact form of the decorator. The comment on the list documents what each row represents.
+
+The same pattern appears in `test_word_repository.py`:
+
+- Lines 88–91: `@pytest.mark.parametrize("invalid_root", [123, "hello"])` — non-dict, non-list JSON roots must raise `TypeError`.
+- Lines 177–184: `test_validate_normalize_invalid_cases` — 9 invalid values (non-strings, empty, bad characters, too short) all must return `None`.
+- Lines 247–250: `test_get_by_difficulty_requires_string` — `[123, None, [], {}]` must all raise `TypeError`.
+
+#### Pattern E — Parametrizing exception types
+
+`tests/unit/test_console_view.py:118-137`:
+
+```python
+@pytest.mark.parametrize("exception", [KeyboardInterrupt, EOFError])
+def test_prompt_handles_interrupt(view, monkeypatch, exception):
+    def raise_exception(_):
+        raise exception
+
+    monkeypatch.setattr(builtins, "input", raise_exception)
+    ...
+    with pytest.raises(SystemExit) as e:
+        view.prompt("Enter:")
+
+    assert e.value.code == 0
+    assert clear_called
+```
+
+The parameter here isn't data — it's an **exception class**. The contract being tested (from `ConsoleView.prompt` in `hangman/view/console_view.py:25-31`) is: *both* `Ctrl+C` (`KeyboardInterrupt`) *and* end-of-input (`EOFError`) must trigger the same safe shutdown: clear the screen and `exit(0)`. Parametrizing the exception type guarantees the two code paths in the `except (KeyboardInterrupt, EOFError):` clause are each exercised.
+
+This exact pattern is repeated 3 times in the file (lines 118, 148, 188) for `prompt`, `prompt_hidden`, and `pause` — the three methods that read user input.
+
+#### Pattern F — Platform-dependent behavior
+
+`tests/unit/test_console_view.py:40-56`:
+
+```python
+@pytest.mark.parametrize("os_name,expected_cmd", [
+    ("nt", "cls"),
+    ("posix", "clear"),
+])
+def test_clear_executes_correct_command(view, monkeypatch, os_name, expected_cmd):
+    calls = []
+
+    def mock_system(cmd):
+        calls.append(cmd)
+
+    monkeypatch.setattr(os, "name", os_name)
+    monkeypatch.setattr(os, "system", mock_system)
+
+    view.clear()
+
+    assert len(calls) == 1
+    assert calls == [expected_cmd]
+```
+
+This tests the one-liner in `ConsoleView.clear()` (`hangman/view/console_view.py:14-16`):
+
+```python
+os.system('cls' if os.name == 'nt' else 'clear')
+```
+
+Since you can't be on Windows and Linux at the same time, parametrization + `monkeypatch` lets you **simulate both platforms** in one test: `os.name == "nt"` → `cls`, `os.name == "posix"` → `clear`. This is a great example of parametrization combined with the `monkeypatch` fixture (Topic 5.1, §4).
+
+#### Pattern G — Contract testing by method name (the "meta" use)
+
+`tests/unit/test_view_interface.py:21-44`:
+
+```python
+@pytest.mark.parametrize(
+    "method_name, args",
+    [
+        ("display", ("Hello",)),
+        ("show_title", ()),
+        ("prompt", ("Enter something:",)),
+        ("prompt_hidden", ("Enter secret:",)),
+        ("pause", ()),
+        ("pause", ("Custom pause message",)),
+        ("clear", ()),
+        ("show_word", (["a", "_", "c"],)),
+        ("show_word", ([],)),  # edge case: empty list
+        ("show_health", (object(),)),  # generic player object
+    ],
+)
+def test_all_methods_raise_not_implemented(view_instance, method_name, args):
+    method = getattr(view_instance, method_name)
+
+    with pytest.raises(NotImplementedError):
+        method(*args)
+```
+
+This is the most sophisticated use in the project. The parameters are **the method name and its argument tuple**, and the body uses `getattr` + `method(*args)` to call whatever method the row specifies. It encodes the entire 8-method contract of the `View` interface (topic 1.5 of the guide) as data. Note the rows for `pause` with zero and one argument — both must work because `pause` has a default parameter.
+
+The same file has lighter versions:
+
+- Lines 84–93: `test_methods_require_argument` — parametrizes 5 method names, each must raise `TypeError` when called with no arguments.
+- Lines 121–128: `test_display_edge_cases` — parametrizes message strings (`""`, `" "`, `"\n"`, a 1000-char string, ...).
+- Lines 131–142: `test_show_word_edge_cases` — parametrizes word-state lists (`[]`, `["_"]`, `["a","b","c"]`).
+- Lines 145–156: `test_display_invalid_types` / `test_show_word_invalid_types` — parametrizes wrong *types* (`None`, `123`, `[]`, `{}`).
+
+#### Pattern H — Simulating interactive sequences (parametrize + mocks)
+
+`tests/unit/test_game_controller.py:82-96`:
+
+```python
+@pytest.mark.parametrize(
+    "inputs, expected",
+    [
+        (["Y"], True),              # Accept normalization
+        (["N"], False),             # Decline normalization
+        (["invalid", "Y"], True),   # Invalid input followed by valid acceptance
+    ],
+)
+def test_choose_normalization(controller_factory, inputs, expected):
+    controller, view = controller_factory()
+    view.prompt.side_effect = inputs
+
+    result = controller.choose_normalization()
+
+    assert result is expected
+```
+
+Here the parameter is a **list of simulated keystrokes**, fed into the mock view via `side_effect` (topic 5.3 of the guide). The third row is the interesting one: it simulates a user typing garbage first, then a valid answer — testing the controller's *retry loop* in one row. The same pattern is used for `choose_word_source` (lines 99–113), `choose_difficulty` (lines 116–130), and `choose_reset_session` (lines 133–147).
+
+This shows a powerful idiom: **parametrize the *scenario* (a sequence of user actions), not just a single value**.
+
+#### Pattern I — Parametrizing "stages" in integration tests
+
+`tests/integration/test_run.py:138-179`:
+
+```python
+@pytest.mark.parametrize("exception_stage", ["view", "controller", "start"])
+def test_run_propagates_exceptions(mocker, monkeypatch, exception_stage):
+    """Ensures that run() does not silently swallow exceptions."""
+    if exception_stage == "view":
+        monkeypatch.setattr(run_module, "ConsoleView",
+                            mocker.Mock(side_effect=RuntimeError("view error")))
+    else:
+        ...
+    if exception_stage == "controller":
+        ...
+    with pytest.raises(RuntimeError):
+        run_module.run()
+```
+
+The parameter is a **stage label** (`"view"`, `"controller"`, `"start"`), and the test body uses `if/else` to set up the corresponding failure. This is the one place in the codebase where parametrization is used as a *label* rather than pure data, because the setup logic genuinely differs per case. It's a reasonable trade-off (one test, three clear failure points in `run()`), but it's worth knowing the boundary: **when each row needs materially different setup or assertions, separate test functions are usually clearer**.
+
+---
+
+### 4. How pytest expands these tests
+
+Each row becomes an independent test with a generated ID built from the parameter values:
+
+```
+tests/unit/test_player.py::test_constructor_initializes_attributes[Alice-5-states0]
+tests/unit/test_player.py::test_lose_health_behavior[5-4-False]
+tests/unit/test_player.py::test_lose_health_behavior[1-0-True]
+tests/unit/test_game.py::test_set_word_invalid_inputs[None]
+tests/unit/test_game.py::test_set_word_invalid_inputs[HELLO!]
+tests/unit/test_console_view.py::test_prompt_handles_interrupt[KeyboardInterrupt]
+tests/unit/test_console_view.py::test_prompt_handles_interrupt[EOFError]
+```
+
+Practical consequences:
+
+- **Precise failure reports.** If the `1 → 0` boundary breaks, you see `test_lose_health_behavior[1-0-True] FAILED` — you know exactly which case failed without reading the code.
+- **Run a single case:** `pytest "tests/unit/test_player.py::test_lose_health_behavior[1-0-True]"`
+- **Filter by substring:** `pytest -k "1-0-True"`
+- **Count:** the project's 27 `@pytest.mark.parametrize` decorators expand into well over 100 individual test cases.
+
+---
+
+### 5. Best practices visible in this codebase
+
+1. **Comment every row.** Almost every table has a trailing comment (`# transition to zero`, `# edge case: empty list`). The table is documentation of *which behaviors* are covered.
+2. **Parametrize data, let fixtures do setup.** `make_player`, `game`, `controller_factory` build the objects; the decorator only varies the inputs. This keeps the decorator readable.
+3. **One row per behavioral category, not per value.** `test_normalization` has 6 rows covering 6 *kinds* of input — not 26 rows for every letter.
+4. **Target the boundaries.** `0`, `1`, negative, empty, `None`, wrong types — the rows are chosen where bugs hide.
+5. **Keep the body identical.** If you find yourself writing `if` branches inside a parametrized test (Pattern I), ask whether the cases really share one behavior.
+6. **Combine with other tools freely.** Parametrization composes with fixtures, `monkeypatch`, `Mock.side_effect`, and `pytest.raises` — the codebase uses all of these combinations.
+
+---
+
+### 6. When to use (and not use) it
+
+| Use `parametrize` when... | Prefer separate tests when... |
+|---|---|
+| Same logic, different data (validation, normalization) | Each case needs different setup or different assertions |
+| You're pinning boundary values | The cases represent genuinely different *scenarios* with distinct flows |
+| You're checking a contract across many methods (Pattern G) | A case is rare/special enough to deserve its own name |
+| You're simulating input sequences (Pattern H) | — |
+
+---
+
+### 7. Quick self-check (try these to lock it in)
+
+1. Run `pytest tests/unit/test_player.py --collect-only` and count how many individual tests `test_lose_health_behavior` expands into. Then run just the `[1-0-True]` case and confirm it passes on its own.
+2. In a **scratch copy** of `tests/unit/test_player.py:87-95`, add a sixth row `(3, 2, False)` and re-run the test. Then, in a scratch copy of `hangman/model/player.py`, delete the `max(0, ...)` floor in `lose_health` and watch which parametrized rows fail — and why the `0` and `-1` rows are the ones that catch it.
+3. In `tests/unit/test_console_view.py:40-43`, add a third row for a hypothetical third platform and explain what `monkeypatch` line would make it pass.
+4. Find all 27 uses of `@pytest.mark.parametrize` in the project (`grep -rn "parametrize" tests/`) and classify each one into one of the 9 patterns above.
+5. Write a new parametrized test in a scratch copy of `test_player.py` for `is_alive()` that covers the boundary between alive and dead, using the `make_player` factory.
+
+**One-line summary:** `@pytest.mark.parametrize` turns one test function into a table-driven suite — the **string** names the parameters, the **list** holds the cases, and pytest runs the body once per row with individually reported results — and this project uses it to lock down constructor constraints, health boundaries, Unicode normalization tables, invalid-input rejection, interrupt handling, platform-specific commands, the `View` interface contract, simulated user-input sequences, and exception propagation at each startup stage.
