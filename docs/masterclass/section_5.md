@@ -786,3 +786,562 @@ Practical consequences:
 5. Write a new parametrized test in a scratch copy of `test_player.py` for `is_alive()` that covers the boundary between alive and dead, using the `make_player` factory.
 
 **One-line summary:** `@pytest.mark.parametrize` turns one test function into a table-driven suite — the **string** names the parameters, the **list** holds the cases, and pytest runs the body once per row with individually reported results — and this project uses it to lock down constructor constraints, health boundaries, Unicode normalization tables, invalid-input rejection, interrupt handling, platform-specific commands, the `View` interface contract, simulated user-input sequences, and exception propagation at each startup stage.
+
+---
+---
+
+## Topic 5.3 — Mocking & Stubbing (`unittest.mock`)
+
+### 1. What the study guide says
+
+> **Mocking & Stubbing (`unittest.mock`):** Using `Mock` objects and `patch` to isolate units. For example, testing the `GameController` behavior requires mocking user input prompts to simulate a complete sequence of game rounds without a real console loop. Using `side_effect` to return sequential inputs to simulate real-world interactive menus.
+
+In plain terms: a **mock** is a fake object that stands in for a real dependency. You *script* what it answers, and it *records* everything it's called with — so you can test one piece of your code in complete isolation, with no terminal, no files, and no human in the loop.
+
+---
+
+### 2. The problem mocking solves
+
+Look at what `GameController` depends on (`hangman/controller/game_controller.py:16-22`):
+
+```python
+def __init__(self, view: ConsoleView, constants_module):
+    self.view = view
+    self.c = constants_module
+    self.game = None
+    ...
+    self.word_repo = WordRepository(BASE_DIR / "data" / "word_bank.json")
+```
+
+And look at what `ConsoleView` actually does (`hangman/view/console_view.py:25-39`):
+
+```python
+def prompt(self, message: str) -> str:
+    try:
+        return input(message)          # ← blocks waiting for a real human
+    ...
+def prompt_hidden(self, message: str) -> str:
+    try:
+        return getpass.getpass(prompt=message)   # ← blocks, hides typing
+```
+
+If you tried to unit-test `GameController.setup_game()` with the **real** view, the test would **hang forever** waiting for keyboard input. It would also need a real `word_bank.json` file and a real `Game` object. That's not a unit test anymore — it's a manual play-through of the game.
+
+**Mocking** solves this: you replace the dependencies with *fake objects* that (a) return pre-programmed answers and (b) record every call they receive, so you can assert *what the controller did* without any terminal, file, or human involved.
+
+This is only possible because of the **Dependency Injection** design (topic 1.3): the view is *passed in* through the constructor, so a test can hand in a fake instead of a `ConsoleView`.
+
+---
+
+### 3. Vocabulary: stub, mock, spy, fake
+
+These terms are often used loosely. Here's the precise distinction, and how Python's `Mock` collapses them into one:
+
+| Term | What it does | Example in this codebase |
+|---|---|---|
+| **Stub** | Answers calls with canned data | `view.prompt.return_value = ""` |
+| **Mock** | Records calls so you can verify them | `view.display.assert_any_call(...)` |
+| **Spy** | A real object with some methods replaced | `controller.handle_letter_guess = Mock(...)` |
+| **Fake** | A hand-written simplified real implementation | the `Player` class in `test_console_view.py` |
+
+In Python, `unittest.mock.Mock` is **all of the first three at once**: it returns whatever you configure *and* records every call. That's why the study guide writes "Mocking & Stubbing" as one topic.
+
+---
+
+### 4. The core tools
+
+Everything in this project's tests comes from four features:
+
+```python
+from unittest.mock import patch, Mock
+```
+
+1. **`Mock()`** — creates a fake object. Any attribute you access is *automatically* another `Mock` (so `view.prompt` "just exists" without you creating it).
+2. **`return_value`** — what the mock returns when called. Same value, every time.
+3. **`side_effect`** — a more powerful alternative to `return_value`:
+   - a **list** → returns items one by one, in order (this is the "sequential inputs" from the study guide),
+   - a **callable** → called instead of the mock,
+   - an **exception** → raised when the mock is called.
+4. **`patch(...)`** — a context manager that *temporarily replaces* an attribute on a module for the duration of a `with` block, then restores the original.
+
+Plus the built-in **assertion helpers** on every mock: `assert_called()`, `assert_called_once()`, `assert_called_with(...)`, `assert_any_call(...)`, `assert_not_called()`, `call_count`, `call_args`, `call_args_list`.
+
+---
+
+### 5. Examples from the codebase
+
+#### Example 1 — Stubbing the View (the study guide's main example)
+
+`tests/unit/test_game_controller.py:11-27` starts with factory fixtures that build fake versions of every dependency:
+
+```python
+@pytest.fixture
+def view_factory():
+    def _factory():
+        view = Mock()
+
+        view.prompt.return_value = ""
+        view.prompt_hidden.return_value = ""
+        view.display.return_value = None
+        view.clear.return_value = None
+        view.pause.return_value = None
+        view.show_title.return_value = None
+        view.show_health.return_value = None
+        view.show_word.return_value = None
+        view.get_choice.return_value = "1"
+
+        return view
+    return _factory
+```
+
+Notice the list of methods — it's exactly the **8-method contract** of the `View` interface in `hangman/view/view_interface.py` (`display`, `show_title`, `prompt`, `prompt_hidden`, `pause`, `clear`, `show_word`, `show_health`). The mock "plays the role" of any view: `ConsoleView`, a future `PygameView`, whatever. This is *program to interfaces* (topic 1.4) paying off in tests.
+
+Two details worth understanding:
+
+- **`view.prompt` is never explicitly created.** `Mock()` auto-generates child mocks on attribute access. That's why you can just write `view.prompt.return_value = ""`.
+- **`return_value = ""` is a stub.** Every time the controller calls `self.view.prompt(...)`, it gets `""` back — no keyboard involved.
+
+The same pattern for the model and the repository (`test_game_controller.py:30-62`):
+
+```python
+@pytest.fixture
+def game_factory():
+    def _factory():
+        game = Mock()
+        game.set_word.return_value = {"ok": True}
+        game.create_players.return_value = {"ok": True}
+        game.reset_for_new_round.return_value = {"ok": True}
+        game.is_game_over.return_value = True
+        game.remaining_players = 1
+        game.n_players = 1
+        game.remaining_spaces = 1
+
+        player = Mock()
+        player.name = "Alice"
+        player.is_alive.return_value = True
+
+        game.get_player.return_value = player
+        game.get_visible_word.return_value = "_ _ _"
+        game.word_label.return_value = "word"
+        return game
+    return _factory
+```
+
+Note the **nested mock**: `game.get_player` returns a *separate* `player` mock, so when the controller does `player.name` it gets `"Alice"` — which is why later assertions can check for the exact string `"Alice has been eliminated.\n"`.
+
+And the wiring fixture (`test_game_controller.py:65-75`):
+
+```python
+@pytest.fixture
+def controller_factory(view_factory, game_factory, word_repo_factory):
+    def _factory():
+        view = view_factory()
+        controller = GameController(view=view, constants_module=Mock())
+
+        controller.game = game_factory()
+        controller.word_repo = word_repo_factory()
+
+        return controller, view
+    return _factory
+```
+
+Two things to notice here:
+
+1. `constants_module=Mock()` — even the constants module is faked, so the test has zero dependence on `hangman/constants.py`.
+2. `controller.word_repo = word_repo_factory()` **overwrites** the real repository that `__init__` created. This is a small design smell worth knowing: ideally `WordRepository` would also be injected through the constructor (full DI, see topic 1.3 §6), and the test wouldn't need to reach in and replace it. The test works around the current design by swapping the attribute after construction.
+
+#### Example 2 — `side_effect` for sequential inputs (the study guide's second bullet)
+
+A stub with `return_value` always answers the same thing. But real users type *different* things on each prompt — and often type *wrong* things first. That's what `side_effect` as a **list** is for: each call to the mock pops the next item.
+
+**2a. Simulating a retry loop.** `test_choose_normalization` (`test_game_controller.py:82-96`):
+
+```python
+@pytest.mark.parametrize(
+    "inputs, expected",
+    [
+        (["Y"], True),              # Accept normalization
+        (["N"], False),             # Decline normalization
+        (["invalid", "Y"], True),   # Invalid input followed by valid acceptance
+    ],
+)
+def test_choose_normalization(controller_factory, inputs, expected):
+    controller, view = controller_factory()
+    view.prompt.side_effect = inputs
+
+    result = controller.choose_normalization()
+
+    assert result is expected
+```
+
+Now look at the code under test (`game_controller.py:28-33`):
+
+```python
+def choose_normalization(self) -> bool:
+    while True:
+        response = self.view.prompt("Enable accent normalization (Y/N)? ").strip().upper()
+        if response in ("Y", "N"):
+            return response == "Y"
+        self.view.display("Invalid input. Please enter Y or N.\n")
+```
+
+With `side_effect = ["invalid", "Y"]`, the **first** `prompt()` call returns `"invalid"` (loop continues, error displayed), the **second** returns `"Y"` (loop exits, returns `True`). One test function, three simulated user behaviors — including the "user makes a mistake" path — with no terminal at all. This is exactly the study guide's "simulate real-world interactive menus."
+
+**2b. Simulating a full multi-step setup flow.** `test_setup_game_retries_invalid_player_count` (`test_game_controller.py:174-195`) simulates an entire configuration session:
+
+```python
+with patch("hangman.controller.game_controller.Game", return_value=mock_game):
+    view.prompt.side_effect = [
+        "Y",   # normalization
+        "1",   # word source
+        "0",   # invalid players
+        "2",   # valid players
+        "Alice",
+        "Bob",
+    ]
+
+    view.prompt_hidden.return_value = "word"
+
+    controller.setup_game()
+
+mock_game.create_players.assert_called_with(["Alice", "Bob"])
+```
+
+The list is a **script of the whole conversation**: accept normalization → manual word → type `0` (rejected: "must be positive") → type `2` → name Alice → name Bob. The final assertion then verifies the controller passed the collected names to the model.
+
+**2c. Two mocks with independent scripts.** `test_setup_game_retries_invalid_word` (`test_game_controller.py:198-214`) drives *two* mocks in parallel:
+
+```python
+mock_game.set_word.side_effect = [
+    {"ok": False, "error": "Invalid"},   # 1st attempt rejected by model
+    {"ok": True},                        # 2nd attempt accepted
+]
+...
+view.prompt.side_effect = ["Y", "1", "1", "Alice"]
+view.prompt_hidden.side_effect = ["bad", "good"]   # moderator types bad word, then good word
+
+controller.setup_game()
+
+assert mock_game.set_word.call_count == 2
+```
+
+The moderator "types" `bad` (model rejects), then `good` (model accepts). The test proves the controller's retry loop actually loops — `set_word` was called exactly twice.
+
+**2d. `side_effect` raising an exception.** `test_start_exhaustion_exit_option` (`test_game_controller.py:746-769`) simulates the word repository *failing*:
+
+```python
+controller.word_repo.get_by_difficulty.side_effect = ValueError(
+    "No unused words remaining"
+)
+
+view.prompt.side_effect = ["Y", "N", "2", "easy"]
+view.get_choice.return_value = "3"  # exit
+
+controller.exit_game = Mock()
+
+controller.start()
+
+controller.exit_game.assert_called()
+```
+
+When `side_effect` is an exception instance, calling the mock **raises it**. This lets the test exercise the controller's recovery menu (the `except ValueError` branch in `start()`, `game_controller.py:398-429`) — a code path that would be nearly impossible to trigger with the real repository unless you exhausted the word bank.
+
+#### Example 3 — `patch`: replacing a class, and the "patch where it's looked up" rule
+
+In `setup_game()`, the controller constructs a real `Game` (`game_controller.py:73`):
+
+```python
+self.game = Game(constants_module=self.c, normalize_input=normalize)
+```
+
+To stop that, the tests wrap the call in `patch`:
+
+```python
+with patch("hangman.controller.game_controller.Game", return_value=mock_game):
+    ...
+    controller.setup_game()
+```
+
+`patch` temporarily replaces the name `Game` **in the `game_controller` module's namespace** with a mock whose `return_value` is `mock_game`. So when `setup_game()` runs `Game(...)`, it actually calls the mock and gets `mock_game` back. When the `with` block ends, the original class is restored — no permanent damage to the codebase.
+
+**The golden rule of `patch`: patch the name where it is *looked up*, not where it is *defined*.** `game_controller.py` does `from hangman.model.game import Game`, which copies the name into the `game_controller` namespace. Patching `hangman.model.game.Game` would have no effect, because the controller doesn't look there at call time. That's why the string is `"hangman.controller.game_controller.Game"`.
+
+You'll see the same rule in the integration test `tests/integration/test_run.py:50-51`:
+
+```python
+monkeypatch.setattr(run_module, "ConsoleView", mock_view_class)
+monkeypatch.setattr(run_module, "GameController", mock_controller_class)
+```
+
+`run.py` does `from hangman.view.console_view import ConsoleView`, so the name lives in the `run` module — and that's where it's patched.
+
+**One subtle exception** in `test_main_executes_run` (`test_run.py:186-211`):
+
+```python
+monkeypatch.setattr(
+    "hangman.controller.game_controller.GameController",
+    mock_controller_class
+)
+monkeypatch.setattr(
+    "hangman.view.console_view.ConsoleView",
+    mock_view_class
+)
+
+runpy.run_module("run", run_name="__main__")
+```
+
+Here the test patches the **original definition sites** instead. Why? Because `runpy.run_module` *re-executes* `run.py` from scratch, so its `from ... import ...` statements run again and pick up whatever is currently in the source modules. When the import happens *after* the patch, patching the source is the right move.
+
+#### Example 4 — Verifying interactions (the mock as a spy)
+
+A mock that only returns values is a stub. The other half of the power is **asserting what happened**. The controller tests use all the main assertion helpers:
+
+**`assert_called_with`** — exact arguments (`test_setup_game_retries_invalid_player_count`):
+
+```python
+mock_game.create_players.assert_called_with(["Alice", "Bob"])
+```
+
+**`assert_any_call`** — "at some point, this exact call happened" (`test_setup_game_retries_invalid_player_input`):
+
+```python
+view.display.assert_any_call("Invalid input. Please enter an integer.\n")
+```
+
+This is how the test verifies the *error message* the user would have seen, without capturing any real output.
+
+**`assert_called` / `assert_called_once` / `assert_not_called`** — presence/absence (`test_start_resets_word_session` vs `test_start_continue_without_reset`):
+
+```python
+controller.word_repo.reset_session.assert_called()      # user chose "Y"
+controller.word_repo.reset_session.assert_not_called()  # user chose "N"
+```
+
+**`call_count`** — how many times (`test_setup_game_retries_invalid_word`):
+
+```python
+assert mock_game.set_word.call_count == 2
+```
+
+**`call_args_list`** — the full call history, for *negative* assertions. `test_run_game_loop_single_player_game_over` (`test_game_controller.py:410-422`) proves that in single-player mode the "all players eliminated" message is **never** shown:
+
+```python
+view.display.assert_any_call("    GAME OVER\n")
+
+for call in view.display.call_args_list:
+    assert "All players have been eliminated" not in call.args[0]
+```
+
+`call.args[0]` is the first positional argument of each recorded `display(...)` call — i.e., the message string.
+
+#### Example 5 — Spying: replacing a method on the object under test
+
+Sometimes you want to test *one* method of a class while stubbing *another* method of the **same** class. `test_run_game_loop_letter_triggers_word_guess_option` (`test_game_controller.py:372-394`) does exactly that:
+
+```python
+controller.handle_letter_guess = Mock(return_value={
+    "correct": True,
+    "game_won": False
+})
+
+controller.handle_word_guess = Mock(return_value={
+    "correct": False,
+    "game_won": False
+})
+
+view.prompt.side_effect = [
+    "1",  # choose letter
+    "Y",  # choose to guess word
+]
+
+controller.run_game_loop()
+
+controller.handle_word_guess.assert_called()
+```
+
+The real `run_game_loop` logic runs, but its two helper methods are replaced with mocks. The test isolates the *decision logic* of the loop ("after a correct letter guess, if the user answers Y, call `handle_word_guess`") from the guess-handling logic, which has its own dedicated tests. This is the **spy** pattern: real object, faked methods.
+
+The same trick appears in the `start()` tests, where `setup_game`, `run_game_loop`, and `exit_game` are all mocked so the test focuses purely on the "play again?" loop:
+
+```python
+controller.setup_game = Mock()
+controller.run_game_loop = Mock()
+controller.exit_game = Mock()
+```
+
+#### Example 6 — Making randomness deterministic
+
+`WordRepository.get_by_difficulty` picks a word with `random.choice`, which makes tests flaky (they pass or fail by luck). `tests/unit/test_word_repository.py:277-279` removes the luck:
+
+```python
+def test_get_by_difficulty_mocked_random(repo_with_words):
+    with patch("random.choice", return_value="CAT"):
+        assert repo_with_words.get_by_difficulty("easy") == "CAT"
+```
+
+`patch("random.choice", ...)` works because `word_repository.py` calls `random.choice(...)` — the lookup happens on the `random` module at call time, so patching `random.choice` intercepts it. The rest of the repository (file reading, normalization, validation) runs for real; only the coin flip is faked. **Mock the boundary (randomness, time, network, disk), not the logic.**
+
+#### Example 7 — The integration test of `run.py`
+
+`tests/integration/test_run.py` is the most complete showcase. It uses the `mocker` fixture, which comes from the **`pytest-mock`** plugin — a thin wrapper around `unittest.mock` that adds automatic cleanup (so you don't need `with patch(...)` blocks).
+
+**7a. Mocking a *class* and its *instance* separately** (`test_run.py:10-19`):
+
+```python
+@pytest.fixture
+def mock_view_factory(mocker):
+    def _factory():
+        mock_view_instance = mocker.Mock(name="ConsoleViewInstance")
+        mock_view_class = mocker.Mock(name="ConsoleView", return_value=mock_view_instance)
+        return mock_view_class, mock_view_instance
+    return _factory
+```
+
+`run.py` does `view = ConsoleView()`. So the test needs **two** mocks: a class mock whose `return_value` is the instance mock. (The `name=` argument is only for readable debug output — it does *not* affect identity.)
+
+**7b. Verifying the wiring (dependency injection, tested)** (`test_run.py:71-82`):
+
+```python
+def test_run_creates_controller_with_correct_dependencies(patched_dependencies):
+    run_module.run()
+
+    patched_dependencies["controller_class"].assert_called_once()
+    _, kwargs = patched_dependencies["controller_class"].call_args
+
+    assert "view" in kwargs
+    assert "constants_module" in kwargs
+    assert kwargs["view"] is patched_dependencies["view_instance"]
+    assert kwargs["constants_module"] is run_module.constants
+```
+
+This test proves `run()` passes the *same* view object it created into the controller — the DI contract from topic 1.3, verified mechanically. `call_args` returns `(args, kwargs)` of the last call; `is` checks object identity.
+
+**7c. Verifying execution *order* with callable `side_effect`s** (`test_run.py:95-131`):
+
+```python
+call_order = []
+
+def view_constructor():
+    call_order.append("view_created")
+    return mock_view_instance
+
+def controller_constructor(*args, **kwargs):
+    call_order.append("controller_created")
+    return mock_controller_instance
+
+def start():
+    call_order.append("start_called")
+
+mock_controller_instance.start.side_effect = start
+...
+run_module.run()
+
+assert call_order == ["view_created", "controller_created", "start_called"]
+```
+
+**7d. Verifying exceptions propagate** (`test_run.py:138-179`):
+
+```python
+monkeypatch.setattr(
+    run_module,
+    "ConsoleView",
+    mocker.Mock(side_effect=RuntimeError("view error"))
+)
+...
+with pytest.raises(RuntimeError):
+    run_module.run()
+```
+
+`test_run_propagates_exceptions` parametrizes three failure stages and uses `side_effect=RuntimeError(...)` to make each mock blow up, then asserts `run()` doesn't swallow it.
+
+---
+
+### 6. Contrast: `monkeypatch` and hand-rolled fakes (not every fake is a `Mock`)
+
+`tests/unit/test_console_view.py` tests the *real* `ConsoleView` — so it can't mock the view itself. Instead it mocks the **lower-level boundaries** the view depends on, using pytest's built-in `monkeypatch` (which does the same replace-and-restore job as `patch`, but with plain functions):
+
+```python
+# test_console_view.py:110-115
+def test_prompt_returns_input(view, monkeypatch):
+    monkeypatch.setattr(builtins, "input", lambda msg: "user_input")
+
+    result = view.prompt("Enter:")
+
+    assert result == "user_input"
+```
+
+and
+
+```python
+# test_console_view.py:44-56
+def test_clear_executes_correct_command(view, monkeypatch, os_name, expected_cmd):
+    calls = []
+
+    def mock_system(cmd):
+        calls.append(cmd)
+
+    monkeypatch.setattr(os, "name", os_name)
+    monkeypatch.setattr(os, "system", mock_system)
+
+    view.clear()
+
+    assert calls == [expected_cmd]
+```
+
+`os.system` is replaced with a plain function that records the command — proving `clear()` runs `cls` on Windows and `clear` on POSIX, without actually clearing any screen.
+
+There's also a **hand-rolled fake** in the same file — the simplest possible stand-in, no `Mock` needed (`test_console_view.py:26-33`):
+
+```python
+@pytest.fixture
+def mock_player():
+    class Player:
+        def __init__(self):
+            self.health = 1
+            self.hangman_states = ["state0", "state1", "state2"]
+
+    return Player()
+```
+
+`ConsoleView.show_health` only touches `player.health` and `player.hangman_states`, so a 5-line class is clearer than a `Mock`. **Rule of thumb: use a plain fake when the dependency is tiny; use `Mock` when it's large or you need call recording.**
+
+---
+
+### 7. Best practices visible in this codebase
+
+1. **Mock at the boundaries, not the logic.** The tests fake I/O (`input`, `getpass`, `os.system`), randomness (`random.choice`), and collaborator objects — never the game rules themselves. `test_game.py` and `test_player.py` contain *zero* mocks: pure logic needs no fakes.
+2. **Patch where the name is looked up.** `"hangman.controller.game_controller.Game"`, `run_module.ConsoleView` — always the module that *uses* the name.
+3. **`return_value` vs `side_effect`:** use `return_value` for "always the same answer"; use a `side_effect` list for "a script of answers"; use an exception for "this call fails."
+4. **A `side_effect` list is consumed in order** and raises `StopIteration` if the code calls the mock more times than the list has items — a useful accidental guard: if your script is too short, the test fails loudly.
+5. **Keep mocks minimal.** `view_factory` stubs only the contract methods. Over-stubbing hides bugs; under-stubbing makes tests flaky.
+6. **Assert on behavior, not implementation.** The tests check user-visible outcomes (exact display strings, `create_players(["Alice", "Bob"])`, `reset_session` called or not) rather than internal variable states.
+7. **Next step to explore: `spec`.** This codebase doesn't use it, but `Mock(spec=View)` would make the mock only allow attributes that exist on `View` — so a typo like `view.promt` fails immediately instead of silently creating a new child mock.
+
+> **Tutor's note (honest observation):** the `get_choice` method stubbed in `view_factory` (`test_game_controller.py:24`) is **not part of the `View` interface** — the same contract deviation flagged in topic 1.4 §6.2. The mock happily fabricates it, which is exactly why the real `ConsoleView` would crash with `AttributeError` if that code path ever ran in production.
+
+---
+
+### 8. Summary: study guide bullet → code
+
+| Study guide claim | Where to see it |
+|---|---|
+| "Using `Mock` objects ... to isolate units" | `view_factory`, `game_factory`, `word_repo_factory` in `tests/unit/test_game_controller.py` |
+| "...mocking user input prompts to simulate a complete sequence of game rounds without a real console loop" | `test_setup_game_retries_invalid_player_count` (6-step prompt script), `test_run_game_loop_*` tests |
+| "Using `side_effect` to return sequential inputs to simulate real-world interactive menus" | `test_choose_normalization` (`["invalid", "Y"]`), `test_setup_game_retries_invalid_word` (`["bad", "good"]`) |
+| `patch` to isolate units | `patch("hangman.controller.game_controller.Game", ...)`; `patch("random.choice", ...)` in `test_word_repository.py` |
+| (Bonus) exception simulation | `side_effect = ValueError(...)` in `test_start_exhaustion_exit_option` |
+| (Bonus) integration-level mocking | `tests/integration/test_run.py` with `pytest-mock`'s `mocker` fixture |
+
+**The one-sentence takeaway:** `Mock` lets you *script* what a dependency answers (`return_value` / `side_effect`) and *audit* what the unit did with it (`assert_*` helpers), while `patch` lets you swap real classes for fakes at the exact point where they're looked up — which is what turns an interactive, file-dependent console game into a suite of fast, deterministic, human-free tests.
+
+---
+
+### 9. Quick self-check (try these to lock it in)
+
+1. In `tests/unit/test_game_controller.py:11-27`, list the attributes configured on the `view` mock and match each one to a method in `hangman/view/view_interface.py`. Which one does *not* exist in the interface?
+2. In a **scratch copy** of `test_choose_normalization`, change the third row to `(["invalid", "X", "Y"], True)` and re-run. Explain why the test still passes, and what `view.display` would have been called with in between.
+3. In `test_setup_game_retries_invalid_word`, delete the second item from `mock_game.set_word.side_effect` and re-run. What exception do you get, and why?
+4. In a scratch copy, change `patch("hangman.controller.game_controller.Game", ...)` to `patch("hangman.model.game.Game", ...)` and observe the test failing. Explain using the "patch where it's looked up" rule.
+5. Write a new test in a scratch copy of `test_game_controller.py` that uses `side_effect` to simulate a user who types three invalid difficulty values before a valid one, and assert the error message was displayed three times.
+
+**One-line summary:** A **mock** is a fake stand-in you *script* with `return_value`/`side_effect` (canned answers, sequential "keystrokes", or raised exceptions) and *audit* with `assert_*` helpers, while **`patch`** temporarily swaps a real class for a fake at the module where it's looked up — together they let this project test the interactive `GameController` and the `run.py` wiring headlessly, deterministically, and without a single real keystroke.
