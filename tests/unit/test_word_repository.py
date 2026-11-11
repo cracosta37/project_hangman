@@ -275,5 +275,5 @@ def test_get_by_difficulty_single_deterministic(repo_single_word):
 
 
 def test_get_by_difficulty_mocked_random(repo_with_words):
-    with patch("random.choice", return_value="CAT"):
+    with patch("hangman.services.word_repository.random.choice", return_value="CAT"):
         assert repo_with_words.get_by_difficulty("easy") == "CAT"
