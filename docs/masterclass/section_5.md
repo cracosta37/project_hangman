@@ -1345,3 +1345,339 @@ def mock_player():
 5. Write a new test in a scratch copy of `test_game_controller.py` that uses `side_effect` to simulate a user who types three invalid difficulty values before a valid one, and assert the error message was displayed three times.
 
 **One-line summary:** A **mock** is a fake stand-in you *script* with `return_value`/`side_effect` (canned answers, sequential "keystrokes", or raised exceptions) and *audit* with `assert_*` helpers, while **`patch`** temporarily swaps a real class for a fake at the module where it's looked up — together they let this project test the interactive `GameController` and the `run.py` wiring headlessly, deterministically, and without a single real keystroke.
+
+---
+---
+
+## Topic 5.4 — Exception Testing
+
+### 1. What the study guide says
+
+> **Exception Testing:** Validating that correct exceptions are raised under failure conditions using `pytest.raises` (e.g., validating that the word repository properly raises `FileNotFoundError` or `ValueError` on bad inputs).
+
+In plain terms: most tests check the **happy path** — "give valid input, get valid output." But real software spends a lot of its life on the **failure path**: the word bank file is missing, the JSON is corrupted, the player presses `Ctrl+C` mid-game, the difficulty bucket runs out of words. **Exception testing** is the practice of deliberately forcing a failure condition and asserting that the code reacts with the **correct exception type** (and, ideally, the correct behavior around it). In pytest, the tool for this is the `pytest.raises` context manager.
+
+---
+
+### 2. The problem it solves
+
+Without exception tests, a "fix" that silently changes error behavior passes the whole suite:
+
+- `WordRepository` starts returning an empty dict instead of raising when the file is missing → the game crashes later, in a confusing place, with a different error.
+- `ConsoleView` stops handling `Ctrl+C` gracefully → the player sees a raw traceback instead of a clean exit.
+- `run()` gets wrapped in a blanket `try/except: pass` to "make errors go away" → real failures vanish silently.
+
+Exception tests freeze the **error contract**: *this* failure must produce *this* exception, with *this* behavior around it. They are the only tests that can catch a regression in code you never exercise in normal play.
+
+---
+
+### 3. The syntax: `pytest.raises`
+
+```python
+with pytest.raises(SomeException):
+    code_that_should_fail()
+```
+
+Three rules to understand:
+
+1. **If the code raises `SomeException`** → the test **passes**. The exception is *caught* by the `with` block, so it doesn't crash the test run.
+2. **If the code raises a *different* exception** (or no exception at all) → the test **fails**. This is the crucial part: `pytest.raises` is not just "expect *some* error," it's "expect *this specific* error."
+3. **You can capture the exception** with `as e` and inspect it: `e.value` is the exception instance, so you can check attributes like `e.value.code` or the message.
+
+There's also an optional `match=` argument (not used in this codebase, but good to know) that regex-matches the exception message:
+
+```python
+with pytest.raises(ValueError, match="Invalid difficulty"):
+    ...
+```
+
+---
+
+### 4. Examples from the codebase
+
+#### Example 1 — `WordRepository`: the study guide's flagship example
+
+This is the exact example the guide cites. Look at the **source** first, `hangman/services/word_repository.py:35-58`, to see what the code *promises* to raise:
+
+```python
+def _load(self) -> None:
+    if not self.file_path.exists():
+        raise FileNotFoundError(f"Word bank file not found: {self.file_path}")   # line 45
+
+    try:
+        with self.file_path.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Word bank file is not valid JSON: {self.file_path}") from exc  # line 51
+
+    if isinstance(data, dict):
+        self._load_from_dict(data)
+    elif isinstance(data, list):
+        self._load_from_list(data)
+    else:
+        raise TypeError("Word bank root must be either an object (dict) or an array (list).")  # line 58
+```
+
+Notice the deliberate choice of **three different exception types** for three different failure modes:
+
+| Failure | Exception | Why this type |
+|---|---|---|
+| File doesn't exist | `FileNotFoundError` | It's an I/O problem — Python's own `open()` would raise this too, so callers can catch it uniformly |
+| File exists but isn't valid JSON | `ValueError` | The *type* is right (it's a file), but the *value* (its contents) is wrong |
+| JSON root is a number or string | `TypeError` | The *type* of the data is wrong |
+
+Now the **tests** in `tests/unit/test_word_repository.py` pin those promises down:
+
+```python
+# tests/unit/test_word_repository.py:75-77
+def test_init_missing_file_raises_error(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        WordRepository(tmp_path / "missing.json")
+```
+
+- `tmp_path` is a built-in pytest fixture that gives each test a fresh, unique temporary directory (topic 5.1, §4). `tmp_path / "missing.json"` is a path that **does not exist** — that's the failure condition.
+- If someone "refactored" `_load()` to return an empty dict instead of raising, this test would fail, because no exception would be raised at all.
+
+```python
+# tests/unit/test_word_repository.py:80-85
+def test_init_invalid_json_raises_error(tmp_path):
+    file_path = tmp_path / "words.json"
+    file_path.write_text("{ invalid json }", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        WordRepository(file_path)
+```
+
+Here the test *manufactures* the failure: it writes a file containing garbage, then asserts the repository converts the low-level `json.JSONDecodeError` into a friendlier `ValueError`. (The source does this with `raise ValueError(...) from exc` — **exception chaining** — so the original JSON error is preserved in the traceback for debugging, while callers only need to handle one clean type.)
+
+```python
+# tests/unit/test_word_repository.py:88-91
+@pytest.mark.parametrize("invalid_root", [123, "hello"])  # Non-dict, non-list types
+def test_invalid_root_types(make_repo, invalid_root):
+    with pytest.raises(TypeError):
+        make_repo(invalid_root)
+```
+
+This shows exception testing **composing with parametrization** (topic 5.2): the same assertion runs once for `123` and once for `"hello"`. If the code ever started accepting a string root, only that parametrized case would fail — pinpointing exactly which input broke the contract.
+
+**The public API: `get_by_difficulty`.** The same file tests the runtime API, not just construction:
+
+```python
+# tests/unit/test_word_repository.py:240-244
+def test_get_by_difficulty_exhaustion(repo_single_word):
+    repo_single_word.get_by_difficulty("easy")   # 1st call: succeeds, takes "CAT"
+
+    with pytest.raises(ValueError):
+        repo_single_word.get_by_difficulty("easy")  # 2nd call: bucket is empty
+```
+
+This is a **stateful** exception test: the failure only exists *after* the first call has consumed the only word. The test encodes a sequence — "do the happy thing once, then the failure must appear."
+
+```python
+# tests/unit/test_word_repository.py:247-250
+@pytest.mark.parametrize("value", [123, None, [], {}])  # Non-string types
+def test_get_by_difficulty_requires_string(repo_with_words, value):
+    with pytest.raises(TypeError):
+        repo_with_words.get_by_difficulty(value)
+
+# tests/unit/test_word_repository.py:253-255
+def test_get_by_difficulty_invalid_key(repo_with_words):
+    with pytest.raises(ValueError):
+        repo_with_words.get_by_difficulty("invalid")
+
+# tests/unit/test_word_repository.py:258-262
+def test_get_by_difficulty_empty_bucket(make_repo):
+    repo = make_repo({"easy": ["cat"]})
+
+    with pytest.raises(ValueError):
+        repo.get_by_difficulty("medium")
+```
+
+Read these three together and a clear **error taxonomy** emerges, which is the real lesson of this section:
+
+- **Wrong type** (`123`, `None`, `[]`, `{}`) → `TypeError`
+- **Right type, wrong value** (`"invalid"` isn't a known difficulty) → `ValueError`
+- **Right type, right value, but no data left** (empty bucket) → `ValueError`
+
+The tests don't just say "it errors out" — they freeze the *distinction* between these cases. If a future refactor accidentally swapped `TypeError` for `ValueError` in `get_by_difficulty`, the parametrized test would catch it immediately.
+
+#### Example 2 — The `View` interface: testing the *contract*
+
+`hangman/view/view_interface.py:4-29` is the abstract base class. Every method body is just:
+
+```python
+def display(self, message: str) -> None:
+    raise NotImplementedError
+```
+
+As topic 1.5 explains, this project chose **duck typing + `NotImplementedError`** instead of an ABC: the base class is a *promise*, and calling an un-overridden method is a contract violation that should blow up loudly. The tests in `tests/unit/test_view_interface.py` enforce that promise:
+
+```python
+# tests/unit/test_view_interface.py:21-44
+@pytest.mark.parametrize(
+    "method_name, args",
+    [
+        ("display", ("Hello",)),
+        ("show_title", ()),
+        ("prompt", ("Enter something:",)),
+        ("prompt_hidden", ("Enter secret:",)),
+        ("pause", ()),
+        ("pause", ("Custom pause message",)),
+        ("clear", ()),
+        ("show_word", (["a", "_", "c"],)),
+        ("show_word", ([],)),  # edge case: empty list
+        ("show_health", (object(),)),  # generic player object
+    ],
+)
+def test_all_methods_raise_not_implemented(view_instance, method_name, args):
+    """
+    Ensure every interface method raises NotImplementedError.
+    This enforces the abstract contract.
+    """
+    method = getattr(view_instance, method_name)
+
+    with pytest.raises(NotImplementedError):
+        method(*args)
+```
+
+This is a **contract test**: it says "no matter what arguments you pass, an unimplemented view method must always fail with `NotImplementedError`." It's parametrized across all 8 interface methods, including edge-case arguments (empty list, a bare `object()`), so the contract holds even at the boundaries.
+
+There's a second, subtler exception test in the same file:
+
+```python
+# tests/unit/test_view_interface.py:84-93
+@pytest.mark.parametrize(
+    "method_name",
+    ["display", "prompt", "prompt_hidden", "show_word", "show_health"]
+)
+def test_methods_require_argument(view_instance, method_name):
+    """Methods requiring arguments should raise TypeError when missing."""
+    method = getattr(view_instance, method_name)
+
+    with pytest.raises(TypeError):
+        method()
+```
+
+Here the exception under test is **Python's own** `TypeError` for a missing required argument. The test verifies the *signatures* of the interface: these five methods must keep requiring an argument. If someone added a default value to `display(message="")`, this test would fail — protecting the interface's shape, not just its behavior.
+
+#### Example 3 — `ConsoleView`: testing *recovery* behavior, not just the exception
+
+This is the most instructive example in the codebase, because it shows that exception testing is often about **what happens around** the exception.
+
+The source, `hangman/view/console_view.py:25-31`:
+
+```python
+def prompt(self, message: str) -> str:
+    try:
+        return input(message)
+    except (KeyboardInterrupt, EOFError):
+        self.clear()
+        print("\nGame interrupted. Exiting safely.\n")
+        exit(0)
+```
+
+When the user hits `Ctrl+C` (`KeyboardInterrupt`) or the input stream ends (`EOFError`), the view cleans up (clears the screen, prints a farewell) and exits **gracefully with code 0** — not with an ugly traceback.
+
+The test, `tests/unit/test_console_view.py:118-137`:
+
+```python
+@pytest.mark.parametrize("exception", [KeyboardInterrupt, EOFError])
+def test_prompt_handles_interrupt(view, monkeypatch, exception):
+    def raise_exception(_):
+        raise exception
+
+    monkeypatch.setattr(builtins, "input", raise_exception)
+
+    clear_called = False
+
+    def mock_clear():
+        nonlocal clear_called
+        clear_called = True
+
+    monkeypatch.setattr(view, "clear", mock_clear)
+
+    with pytest.raises(SystemExit) as e:
+        view.prompt("Enter:")
+
+    assert e.value.code == 0
+    assert clear_called
+```
+
+Let's dissect every piece, because this test does **four** things at once:
+
+1. **Manufacturing the failure.** You can't press `Ctrl+C` inside a test, so the test *simulates* it: `monkeypatch.setattr(builtins, "input", raise_exception)` replaces the built-in `input()` with a function that raises the exception. Parametrization runs the whole scenario twice — once for `KeyboardInterrupt`, once for `EOFError`.
+2. **Asserting the exception type.** `exit(0)` raises `SystemExit`, so `pytest.raises(SystemExit)` verifies the view exits *cleanly* rather than crashing with the raw `KeyboardInterrupt`.
+3. **Asserting the exit code.** `as e` captures the exception, and `e.value.code == 0` verifies it's a *graceful* exit (code 0 = success), not an error exit. This is the "inspect the exception" pattern in action.
+4. **Asserting side effects.** `clear_called` verifies the cleanup (`self.clear()`) actually ran before the exit. An implementation that forgot the cleanup would pass the exception check but fail this assertion.
+
+The same pattern is repeated for `prompt_hidden` (patching `getpass.getpass` instead of `input`, lines 148-167) and `pause` (lines 188-207) — three prompts, three graceful-exit guarantees.
+
+#### Example 4 — `run.py`: testing that exceptions are *not swallowed*
+
+The last category is the inverse: sometimes the correct behavior is that an exception **propagates** out of a function instead of being silently caught. `tests/integration/test_run.py:138-179`:
+
+```python
+@pytest.mark.parametrize("exception_stage", ["view", "controller", "start"])
+def test_run_propagates_exceptions(mocker, monkeypatch, exception_stage):
+    """
+    Ensures that run() does not silently swallow exceptions.
+    """
+    if exception_stage == "view":
+        monkeypatch.setattr(
+            run_module,
+            "ConsoleView",
+            mocker.Mock(side_effect=RuntimeError("view error"))
+        )
+    # ... (similar setup for "controller" and "start" stages) ...
+
+    with pytest.raises(RuntimeError):
+        run_module.run()
+```
+
+`run.py:6-9` is a tiny orchestrator:
+
+```python
+def run():
+        view = ConsoleView()
+        controller = GameController(view=view, constants_module=constants)
+        controller.start()
+```
+
+The test injects a `RuntimeError` at each of the three stages (view construction, controller construction, `start()`) using `Mock(side_effect=...)` — a mock that raises instead of returning (topic 5.3, §4) — and asserts that `run()` lets the error bubble up. Why does this matter? Because a common "helpful" refactor is to wrap `run()` in a blanket `try/except: pass` to "make errors go away." That would hide real failures. This test freezes the rule: **`run()` must not swallow exceptions.**
+
+---
+
+### 5. Patterns and takeaways
+
+Pulling the whole codebase together, here are the reusable lessons from this topic:
+
+1. **Test the *specific* exception type, never "some error."** `pytest.raises(ValueError)` and `pytest.raises(TypeError)` are different tests. This codebase's `WordRepository` deliberately maps failure modes to distinct built-in types (file missing → `FileNotFoundError`, bad value → `ValueError`, wrong type → `TypeError`, unimplemented contract method → `NotImplementedError`, clean shutdown → `SystemExit`), and the tests lock each mapping in place.
+2. **Manufacture the failure condition deliberately.** Every exception test needs a way to *force* the bad state. The codebase uses four techniques:
+   - **Bad data on disk** — write `"{ invalid json }"` to a `tmp_path` file.
+   - **Bad arguments** — pass `123`, `None`, `"invalid"` directly.
+   - **State manipulation** — call `get_by_difficulty("easy")` once to exhaust the bucket, then expect the failure.
+   - **Mocking/monkeypatching** — replace `input`/`getpass` with functions that raise, or give a `Mock` a `side_effect` that raises.
+3. **Assert more than the type.** The strongest tests in the codebase check the *whole* failure behavior: `e.value.code == 0` (the exit code of `SystemExit` — graceful, not a crash), `clear_called` (cleanup side effects ran before the exit), and the exception *propagating* out of `run()` (the negative guarantee).
+4. **Exception tests compose with everything else.** You'll see `pytest.raises` combined with `@pytest.mark.parametrize` (one assertion, many failure inputs), `monkeypatch` (simulating interrupts), `Mock.side_effect` (simulating component failures), and factory fixtures (`make_repo`, `repo_single_word`). That's exactly what the study guide means when it says the codebase "uses all of these combinations."
+5. **Exception tests are *design* tests.** Several of these tests don't verify behavior at all — they verify **decisions**: `test_all_methods_raise_not_implemented` freezes the "duck typing + `NotImplementedError`" design choice (topic 1.5); `test_methods_require_argument` freezes the interface signatures; `test_run_propagates_exceptions` freezes the "no silent swallowing" rule. If someone later "improves" the code in a way that breaks one of these decisions, the test fails *loudly and immediately*, forcing the change to be made on purpose.
+
+**Quick reference: where to look in this repo**
+
+| File | What it exception-tests |
+|---|---|
+| `tests/unit/test_word_repository.py` | `FileNotFoundError`, `ValueError`, `TypeError` on load and on `get_by_difficulty` |
+| `tests/unit/test_view_interface.py` | `NotImplementedError` contract, `TypeError` for missing arguments |
+| `tests/unit/test_console_view.py` | `SystemExit` (code 0) + cleanup on `KeyboardInterrupt`/`EOFError` |
+| `tests/integration/test_run.py` | `RuntimeError` propagation through all three startup stages |
+
+---
+
+### 6. Quick self-check (try these to lock it in)
+
+1. In a **scratch copy** of `tests/unit/test_word_repository.py:75-77`, change `FileNotFoundError` to `OSError` and re-run — the test still passes (why? `FileNotFoundError` is a *subclass* of `OSError`). Then change it to `ValueError` and explain why it now fails.
+2. In a scratch copy of `hangman/services/word_repository.py`, change the `raise TypeError(...)` at line 58 to `raise ValueError(...)`, run `pytest tests/unit/test_word_repository.py -v`, and watch `test_invalid_root_types` fail. That's the "frozen distinction" from Example 1 in action.
+3. In a scratch copy of `tests/unit/test_console_view.py:133-136`, delete the `assert e.value.code == 0` line. The test still passes — explain what behavior is no longer protected.
+4. In a scratch copy of `hangman/view/console_view.py`, remove the `self.clear()` call from `prompt`'s `except` block, run `pytest tests/unit/test_console_view.py -k interrupt`, and explain which assertion catches the change.
+5. Write a new test in a scratch copy of `test_word_repository.py` that uses `pytest.raises(ValueError, match="Invalid difficulty")` to verify the *message* of the error raised by `get_by_difficulty("invalid")`.
+
+**One-line summary:** Exception testing with `pytest.raises` means *deliberately creating the failure, asserting the exact exception type the design promises, and checking the surrounding behavior (exit codes, cleanup, propagation)* — and in this codebase it doubles as a guardrail that freezes deliberate design decisions.
