@@ -1681,3 +1681,376 @@ Pulling the whole codebase together, here are the reusable lessons from this top
 5. Write a new test in a scratch copy of `test_word_repository.py` that uses `pytest.raises(ValueError, match="Invalid difficulty")` to verify the *message* of the error raised by `get_by_difficulty("invalid")`.
 
 **One-line summary:** Exception testing with `pytest.raises` means *deliberately creating the failure, asserting the exact exception type the design promises, and checking the surrounding behavior (exit codes, cleanup, propagation)* — and in this codebase it doubles as a guardrail that freezes deliberate design decisions.
+
+---
+---
+
+## Topic 5.5 — Integration Testing
+
+### 1. What the study guide says
+
+> **Integration Testing:** Simulating the entrypoint (`run.py`) in `test_run.py` using `runpy` to test system initialization and coordinate module configurations under simulated execution blocks.
+
+In plain terms: a **unit test** asks "does this one class behave correctly when its collaborators are fakes?" An **integration test** asks "are the real pieces actually *wired together* correctly, and does the system *start*?" This project's integration suite lives in `tests/integration/test_run.py` and targets the application's **composition root** — the 13-line `run.py` that creates the view, injects it into the controller, and starts the game.
+
+---
+
+### 2. The problem it solves: the wiring blind spot
+
+The unit tests in this project build every class in complete isolation. For example, `tests/unit/test_game_controller.py:65-75` constructs the controller with a mocked view and then overwrites `controller.game` and `controller.word_repo` with mocks:
+
+```python
+@pytest.fixture
+def controller_factory(view_factory, game_factory, word_repo_factory):
+    def _factory():
+        view = view_factory()
+        controller = GameController(view=view, constants_module=Mock())
+
+        controller.game = game_factory()
+        controller.word_repo = word_repo_factory()
+
+        return controller, view
+    return _factory
+```
+
+Every collaborator is a `Mock`, so the unit suite can never catch a bug in the *glue* — the code that decides which objects get created and passed to whom. That glue is `run.py`, and it's exactly the kind of code where a one-character typo (a missing keyword argument, a deleted line) breaks the app at launch while every unit test stays green.
+
+**Integration tests close that gap:** they run the *real* wiring code and only mock the terminal components (the view and the controller), so the seams between them are exercised for real.
+
+---
+
+### 3. The code under test: `run.py`
+
+The entire "system" being integrated is 13 lines (`run.py:1-13`):
+
+```python
+from hangman.view.console_view import ConsoleView
+from hangman.controller.game_controller import GameController
+from hangman import constants
+
+
+def run():
+        view = ConsoleView()
+        controller = GameController(view=view, constants_module=constants)
+        controller.start()
+
+
+if __name__ == "__main__":
+    run()
+```
+
+Three integration points to verify:
+
+1. `ConsoleView()` is instantiated.
+2. `GameController` receives **that exact view instance** plus the **real `constants` module** (the Dependency Injection contract from topic 1.3).
+3. `controller.start()` is called, and exceptions are not swallowed.
+
+---
+
+### 4. Examples from the codebase: `tests/integration/test_run.py`
+
+The project separates tests by type into folders — `tests/unit/` and `tests/integration/`. The integration file is organized in four bands: factory fixtures, a semantic fixture, core wiring tests, and the `__main__` execution path. Let's walk through each.
+
+#### Example 1 — Factory fixtures: mocking a *class* and its *instance*
+
+`tests/integration/test_run.py:10-19`:
+
+```python
+@pytest.fixture
+def mock_view_factory(mocker):
+    """
+    Factory fixture that returns a mocked ConsoleView class and instance.
+    """
+    def _factory():
+        mock_view_instance = mocker.Mock(name="ConsoleViewInstance")
+        mock_view_class = mocker.Mock(name="ConsoleView", return_value=mock_view_instance)
+        return mock_view_class, mock_view_instance
+    return _factory
+```
+
+Two ideas at work:
+
+- **Factory fixture pattern** (topic 5.1, Pattern B): the fixture returns a *callable* so each test gets a fresh, independent mock pair.
+- **Mocking a class, not just an object.** `mock_view_class` is a `Mock` whose `return_value` is `mock_view_instance`. When `run()` executes `view = ConsoleView()`, it calls the mock class and gets back *that same* `mock_view_instance` — which is what lets a later test assert that the controller received exactly the object the "factory" produced.
+
+`mock_controller_factory` (`test_run.py:22-34`) does the identical thing for `GameController`.
+
+#### Example 2 — The semantic fixture: patching at the point of use
+
+`tests/integration/test_run.py:41-58`:
+
+```python
+@pytest.fixture
+def patched_dependencies(monkeypatch, mock_view_factory, mock_controller_factory):
+    """
+    Patches ConsoleView and GameController inside run.py.
+    Returns structured access to mocks.
+    """
+    mock_view_class, mock_view_instance = mock_view_factory()
+    mock_controller_class, mock_controller_instance = mock_controller_factory()
+
+    monkeypatch.setattr(run_module, "ConsoleView", mock_view_class)
+    monkeypatch.setattr(run_module, "GameController", mock_controller_class)
+
+    return {
+        "view_class": mock_view_class,
+        "view_instance": mock_view_instance,
+        "controller_class": mock_controller_class,
+        "controller_instance": mock_controller_instance,
+    }
+```
+
+Key techniques:
+
+- **`monkeypatch.setattr`** (pytest's built-in, topic 5.1 §4) replaces an attribute and **automatically restores it after the test** — no manual cleanup, no risk of one test's mock leaking into the next.
+- **Patch where the name is looked up, not where it's defined** (topic 5.3, Example 3). `run.py` does `from hangman.view.console_view import ConsoleView`, which binds the name `ConsoleView` into `run`'s own namespace. So the fixture patches `run_module.ConsoleView` — the name *as seen by `run.py`*. Patching `hangman.view.console_view.ConsoleView` here would have no effect, because `run.py` already holds its own reference. (This subtlety pays off again in Example 6.)
+- **Structured return value.** The dict gives each test readable access: `patched_dependencies["view_instance"]`, etc.
+
+#### Example 3 — The core wiring tests
+
+**3a. The view is created** (`test_run.py:65-68`):
+
+```python
+def test_run_creates_view_instance(patched_dependencies):
+    run_module.run()
+
+    patched_dependencies["view_class"].assert_called_once_with()
+```
+
+The *real* `run()` executes; the test asserts the (mocked) `ConsoleView` class was called exactly once with no arguments.
+
+**3b. The controller receives the correct dependencies — the heart of the file** (`test_run.py:71-82`):
+
+```python
+def test_run_creates_controller_with_correct_dependencies(patched_dependencies):
+    run_module.run()
+
+    patched_dependencies["controller_class"].assert_called_once()
+
+    _, kwargs = patched_dependencies["controller_class"].call_args
+
+    assert "view" in kwargs
+    assert "constants_module" in kwargs
+
+    assert kwargs["view"] is patched_dependencies["view_instance"]
+    assert kwargs["constants_module"] is run_module.constants
+```
+
+This is the most important test in the file. It inspects `call_args` — the recorded arguments of the last call to the mock — and checks:
+
+- `kwargs["view"] is patched_dependencies["view_instance"]` — the **identity check** (`is`, not `==`). The controller must receive the *very same object* that `run()` created, not a copy or a different instance. This is exactly what Dependency Injection promises: one view instance shared across the system.
+- `kwargs["constants_module"] is run_module.constants` — the **real** constants module (max health, ASCII graphics, etc.) is injected, not a mock.
+
+If someone refactored `run.py` to `GameController(view)` — forgetting `constants_module` — this test fails immediately, while every unit test would still be green.
+
+**3c. The game actually starts** (`test_run.py:85-88`):
+
+```python
+def test_run_calls_controller_start(patched_dependencies):
+    run_module.run()
+
+    patched_dependencies["controller_instance"].start.assert_called_once_with()
+```
+
+Creating the objects isn't enough — `run()` must call `start()`. A classic real-world bug: someone deletes that line, the app launches and silently does nothing.
+
+#### Example 4 — Execution order: `side_effect` as a call logger
+
+`tests/integration/test_run.py:95-131`:
+
+```python
+def test_run_execution_order(mocker, monkeypatch):
+    """
+    Ensures the correct sequence:
+    1. View created
+    2. Controller created
+    3. Controller.start() called
+    """
+    call_order = []
+
+    mock_view_instance = mocker.Mock()
+    def view_constructor():
+        call_order.append("view_created")
+        return mock_view_instance
+
+    mock_controller_instance = mocker.Mock()
+    def controller_constructor(*args, **kwargs):
+        call_order.append("controller_created")
+        return mock_controller_instance
+
+    def start():
+        call_order.append("start_called")
+
+    mock_controller_instance.start.side_effect = start
+
+    monkeypatch.setattr(run_module, "ConsoleView", view_constructor)
+    monkeypatch.setattr(run_module, "GameController", controller_constructor)
+
+    run_module.run()
+
+    assert call_order == [
+        "view_created",
+        "controller_created",
+        "start_called"
+    ]
+```
+
+This test uses a different mocking style: instead of `Mock` classes, it injects **plain functions** as the "constructors," each appending to a shared `call_order` list. `side_effect` (topic 5.3, §4) is used here as a *call logger* rather than a sequential-input simulator.
+
+Why does order matter? Because `run()` passes the view *into* the controller's constructor — the view must exist first. If someone reordered the lines, the app would crash with a `NameError` at startup. The test freezes the intended initialization sequence.
+
+#### Example 5 — Parametrized exception propagation
+
+`tests/integration/test_run.py:138-179` (also covered in topic 5.4, Example 4):
+
+```python
+@pytest.mark.parametrize("exception_stage", ["view", "controller", "start"])
+def test_run_propagates_exceptions(mocker, monkeypatch, exception_stage):
+    """
+    Ensures that run() does not silently swallow exceptions.
+    """
+    if exception_stage == "view":
+        monkeypatch.setattr(
+            run_module,
+            "ConsoleView",
+            mocker.Mock(side_effect=RuntimeError("view error"))
+        )
+
+    else:
+        mock_view_instance = mocker.Mock()
+        monkeypatch.setattr(
+            run_module,
+            "ConsoleView",
+            mocker.Mock(return_value=mock_view_instance)
+        )
+
+    if exception_stage == "controller":
+        monkeypatch.setattr(
+            run_module,
+            "GameController",
+            mocker.Mock(side_effect=RuntimeError("controller error"))
+        )
+
+    else:
+        mock_controller_instance = mocker.Mock()
+
+        if exception_stage == "start":
+            mock_controller_instance.start.side_effect = RuntimeError("start error")
+
+        monkeypatch.setattr(
+            run_module,
+            "GameController",
+            mocker.Mock(return_value=mock_controller_instance)
+        )
+
+    with pytest.raises(RuntimeError):
+        run_module.run()
+```
+
+One parametrized test (topic 5.2, Pattern I) running three scenarios:
+
+| `exception_stage` | What fails | Where the error is injected |
+|---|---|---|
+| `"view"` | `ConsoleView()` | class mock's `side_effect` |
+| `"controller"` | `GameController(...)` | class mock's `side_effect` |
+| `"start"` | `controller.start()` | instance mock's `start.side_effect` |
+
+The assertion is the same for all three: `run()` must let the `RuntimeError` **propagate** — it must not wrap the wiring in a `try/except` that swallows the failure. A composition root that silently dies is far harder to debug than one that crashes loudly.
+
+#### Example 6 — The `__main__` test: `runpy` and the "simulated execution block"
+
+`tests/integration/test_run.py:186-211` — the test the study guide specifically calls out:
+
+```python
+def test_main_executes_run(monkeypatch, mocker):
+    """
+    Tests that when run.py is executed as __main__, it calls run() and thus starts the game.
+    """
+
+    # Mock controller instance
+    mock_controller = mocker.Mock()
+    mock_controller.start = mocker.Mock()
+
+    # Mock classes
+    mock_controller_class = mocker.Mock(return_value=mock_controller)
+    mock_view_class = mocker.Mock()
+
+    # Patch ORIGINAL import sources
+    monkeypatch.setattr(
+        "hangman.controller.game_controller.GameController",
+        mock_controller_class
+    )
+    monkeypatch.setattr(
+        "hangman.view.console_view.ConsoleView",
+        mock_view_class
+    )
+
+    runpy.run_module("run", run_name="__main__")
+
+    mock_controller.start.assert_called_once()
+```
+
+Three concepts are packed into this test:
+
+**a) `runpy.run_module("run", run_name="__main__")`.** `runpy` re-executes a module *as if you had run it from the command line*. The crucial argument is `run_name="__main__"`: it sets the module's `__name__` to `"__main__"` during execution, so the guard
+
+```python
+if __name__ == "__main__":
+    run()
+```
+
+actually fires. This is the study guide's "simulated execution block" — we simulate `python run.py` **in-process**, without spawning a subprocess, without a real terminal, and without a real game loop (the view and controller are still mocks).
+
+**b) Why the patching strategy changes here.** Notice the comment `# Patch ORIGINAL import sources`. In the earlier tests we patched `run_module.ConsoleView` (the name in `run`'s namespace). Here we patch `hangman.view.console_view.ConsoleView` and `hangman.controller.game_controller.GameController` — the *source* modules.
+
+Why? Because `runpy.run_module` **re-executes** `run.py` from scratch. Its `from hangman.view.console_view import ConsoleView` statements run again and re-bind the names in `run`'s namespace — pulling whatever is currently in the source modules. Since we patched the sources, the fresh re-execution picks up the mocks. This is a concrete example of the golden rule from topic 5.3: **patch where the name is looked up at the moment of use.**
+
+**c) What it guards.** If someone "cleaned up" `run.py` and deleted the `if __name__ == "__main__":` block (or renamed `run`), the app would do nothing when launched — and no unit test would notice. This test is the only one that exercises that guard.
+
+---
+
+### 5. What bugs does this catch that unit tests can't?
+
+| Bug in `run.py` | Caught by |
+|---|---|
+| Forgetting `constants_module=constants` | `test_run_creates_controller_with_correct_dependencies` |
+| Passing a *different* view instance to the controller | same test (the `is` identity check) |
+| Reordering: controller created before view | `test_run_execution_order` |
+| Deleting `controller.start()` | `test_run_calls_controller_start` |
+| Wrapping `run()` in a `try/except: pass` | `test_run_propagates_exceptions` |
+| Deleting the `__main__` guard | `test_main_executes_run` |
+
+Every one of these is a "the app won't start" bug that a 100%-green unit suite would happily miss.
+
+---
+
+### 6. Patterns and takeaways
+
+1. **Integration tests test the seams, not the logic.** Here the "seam" is the composition root `run.py`: the place where `ConsoleView`, `GameController`, and `constants` are wired together.
+2. **Mock the leaves, run the glue.** The real `run()` executes; only the terminal components (view, controller) are mocked. That's the opposite of unit tests, where the class under test is real and *everything around it* is mocked.
+3. **Identity assertions (`is`) verify DI wiring** — that the same object flows from creation to injection.
+4. **`monkeypatch.setattr`** gives automatic cleanup; **`side_effect`** doubles as a call logger or an error injector; **`call_args`** lets you inspect exactly what a constructor received.
+5. **`runpy.run_module(..., run_name="__main__")`** simulates launching the program in-process, letting you test the `__main__` guard without a subprocess.
+6. **Patch at the lookup site:** patch `run_module.ConsoleView` when calling `run()` directly, but patch the source modules when `runpy` re-executes the file and re-binds the names.
+
+**How to run it:**
+
+```bash
+# just the integration tests
+pytest tests/integration -v
+
+# the whole suite (unit + integration)
+pytest -v
+```
+
+---
+
+### 7. Quick self-check (try these to lock it in)
+
+1. In a **scratch copy** of `run.py`, change `GameController(view=view, constants_module=constants)` to `GameController(view)` and run `pytest tests/integration -v`. Which test fails, and which assertion line tells you why?
+2. In a scratch copy of `run.py`, change the controller line to `GameController(view=ConsoleView(), constants_module=constants)` — creating a *second* view for the controller. Run the integration suite and explain which assertions fail, and why the `is` identity check matters.
+3. In a scratch copy of `test_run.py`, change `runpy.run_module("run", run_name="__main__")` to `runpy.run_module("run")` (no `run_name`). What happens to `mock_controller.start.assert_called_once()`, and why?
+4. In a scratch copy of `test_main_executes_run`, change the two `monkeypatch.setattr` calls to patch `run_module.ConsoleView` / `run_module.GameController` instead of the source modules. Explain why the mocks are no longer used (hint: when does `run.py`'s `from ... import` execute relative to your patch?).
+5. Write a new integration test in a scratch copy of `test_run.py` that asserts `run()` calls `ConsoleView()` with **no arguments** and `GameController` with **no positional arguments** (keyword arguments only), using `call_args`.
+
+**One-line summary:** An integration test runs the *real* wiring code — here the 13-line composition root `run.py` — with only the terminal components mocked, using `monkeypatch` to patch at the lookup site, `call_args` + `is` to verify the DI wiring, `side_effect` to log call order and inject failures, and `runpy.run_module(..., run_name="__main__")` to simulate the program launch — proving the system actually starts, not just that each piece works in isolation.
