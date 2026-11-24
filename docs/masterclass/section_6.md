@@ -596,3 +596,224 @@ If the code had used `BASE_DIR + "\\data\\word_bank.json"`, it would work on thi
 4. Experiment: temporarily replace line 22 of `game_controller.py` with the old-style `os.path.join(BASE_DIR, "data", "word_bank.json")` and line 48 of `word_repository.py` with `open(str(self.file_path), "r")` — the app will still work on Windows, but you'll feel exactly how much more fragile and verbose the string-based approach is.
 
 **One‑line summary:** `pathlib.Path` turns file paths from fragile strings into objects — join with `/` (`BASE_DIR / "data" / "word_bank.json"`), anchor with `Path(__file__).resolve().parent.parent`, and call `.exists()`/`.open()`/`.write_text()` on the path itself — so the same code works on Windows, macOS, and Linux without a single hardcoded separator.
+
+---
+---
+
+## Topic 6.3 — Safe input via `getpass`
+
+*Based on `docs/masterclass/_study_guide.md` (Section 6, third item) and the actual code in this project.*
+
+### 1. What the study guide says
+
+> **Safe input via `getpass`:**
+> * Using Python's standard `getpass.getpass` library in `ConsoleView` to allow a moderator to insert a secret word or phrase privately without displaying the letters in clear text on the screen.
+
+In plain terms: when the person setting up the game types the secret word, the characters should **not** appear on the screen — just like typing a password. Python's standard library gives us a ready-made tool for exactly that: the `getpass` module.
+
+---
+
+### 2. The problem it solves
+
+The game has two kinds of input:
+
+| Input | Sensitive? | Method used |
+|---|---|---|
+| Player names, letter guesses, "Y/N" choices | No — everyone at the table should see them | `input()` (plain) |
+| The secret word/phrase | **Yes** — the players must not see it | `getpass.getpass()` (hidden) |
+
+If the secret word were entered with the normal `input()`, the letters would echo to the screen as they're typed. Anyone standing behind the moderator (or watching a screen share) could read the word before the game even starts. `getpass` fixes this by **disabling the terminal's echo** while reading the line: you type, nothing appears, and only after you press Enter does the value get returned to your program.
+
+A minimal standalone demo you can run yourself:
+
+```python
+import getpass
+
+name = input("Your name: ")          # echoes: "Your name: Carlos"
+secret = getpass.getpass("Secret: ") # echoes: "Secret: " (nothing while typing)
+
+print("Hello", name, "| you typed", len(secret), "hidden characters")
+```
+
+---
+
+### 3. Where it lives in the codebase
+
+`getpass` appears in exactly **one place in production code** — the View layer:
+
+| File | Role |
+|---|---|
+| `hangman/view/console_view.py` | `import getpass` (line 2) and the `prompt_hidden()` method (lines 33–39) |
+| `hangman/view/view_interface.py` | Declares `prompt_hidden()` as part of the 8-method View contract (lines 16–17) |
+| `hangman/controller/game_controller.py` | *Calls* `self.view.prompt_hidden(...)` at two points (lines 81 and 390) — never touches `getpass` itself |
+| `tests/unit/test_console_view.py` | Tests `prompt_hidden` by monkeypatching `getpass.getpass` (lines 140–167) |
+| `tests/unit/test_game_controller.py` | Mocks `view.prompt_hidden` so controller tests need no terminal at all |
+
+That distribution is the whole design story: **only the View knows that `getpass` exists.**
+
+---
+
+### 4. Code walkthrough
+
+#### a) The contract — `hangman/view/view_interface.py`
+
+```python
+# lines 13–17
+def prompt(self, message: str) -> str:
+    raise NotImplementedError
+
+def prompt_hidden(self, message: str) -> str:
+    raise NotImplementedError
+```
+
+`prompt_hidden` is one of the 8 verbs every view must provide. Notice it has the **exact same signature** as `prompt`: `(message: str) -> str`. That means the rest of the program can treat "ask for a visible answer" and "ask for a hidden answer" as interchangeable operations — the only difference is *how* the answer is collected.
+
+#### b) The implementation — `hangman/view/console_view.py`
+
+```python
+# lines 1–5
+import os
+import getpass          # ← line 2: the only production import of getpass
+from typing import List
+
+from .view_interface import View
+```
+
+```python
+# lines 25–39
+def prompt(self, message: str) -> str:
+    try:
+        return input(message)                    # visible typing
+    except (KeyboardInterrupt, EOFError):
+        self.clear()
+        print("\nGame interrupted. Exiting safely.\n")
+        exit(0)
+
+def prompt_hidden(self, message: str) -> str:
+    try:
+        return getpass.getpass(prompt=message)   # ← hidden typing
+    except (KeyboardInterrupt, EOFError):
+        self.clear()
+        print("\nGame interrupted. Exiting safely.\n")
+        exit(0)
+```
+
+Three things to notice:
+
+1. **`getpass.getpass(prompt=message)`** — the module-level function takes the prompt string and returns the typed line as a `str`, with echo disabled while typing.
+2. **Identical interrupt handling to `prompt`.** `getpass` can also be interrupted with `Ctrl+C` (`KeyboardInterrupt`) or hit end-of-input (`EOFError`). The view catches both, clears the screen, prints a friendly message, and exits with code `0` — the same "graceful exit" guarantee the study guide lists under topic 6.5 (Interrupt Handling). This matters because `getpass` temporarily puts the terminal into a special no-echo state; a clean exit path keeps the console in a sane state.
+3. **The method returns the raw string.** No validation happens here — the view stays "dumb" (per the MVC description in section 1 of the guide). Validation is the Model's job.
+
+#### c) The call sites — `hangman/controller/game_controller.py`
+
+The controller asks for the secret word in two moments of the game flow:
+
+**At game setup** (lines 78–85):
+
+```python
+if source == "1":
+    # Manual (current behavior)
+    while True:
+        raw_word = self.view.prompt_hidden("Please insert the word or phrase: ")
+        result = self.game.set_word(raw_word)
+        if result.get("ok"):
+            break
+        self.view.display(result.get("error", "Invalid word or phrase.") + "\n")
+```
+
+**When starting a new round** (lines 388–394):
+
+```python
+if source == "1":
+    while True:
+        raw_word = self.view.prompt_hidden("Please insert the new word or phrase: ")
+        result = self.game.reset_for_new_round(raw_word)
+        if result.get("ok"):
+            break
+        self.view.display(result.get("error", "Invalid word or phrase.") + "\n")
+```
+
+Read the contrast with the surrounding code: player names and letter guesses use `self.view.prompt(...)` (visible), while the word uses `self.view.prompt_hidden(...)` (hidden). The controller never imports `getpass` and never knows *how* the hiding works — it just picks the right verb. That's **Separation of Concerns** in action: if you later build a `TkinterView` or `WebView`, its `prompt_hidden` could be a password field or an API parameter instead of `getpass`, and the controller wouldn't change a single line.
+
+---
+
+### 5. How `getpass` works under the hood (briefly)
+
+For a beginner, it's enough to know it "hides the typing," but here's the one-paragraph version:
+
+- On **Windows**, it uses the console API to turn off the `ENABLE_ECHO_INPUT` flag while reading, then restores it.
+- On **Unix/macOS**, it uses `termios` to disable the `ECHO` flag on the terminal, reads the line, and restores the original settings.
+- It also disables the line-editing/history mechanism, so the secret isn't saved to shell history or scrollback.
+- If no real terminal is attached (e.g., input is piped), it falls back to reading from `/dev/tty` or stdin — which is why tests never call the real function (see below).
+
+---
+
+### 6. How the codebase tests it
+
+#### a) Unit-testing the View — `tests/unit/test_console_view.py`
+
+The real `getpass.getpass` would block waiting for a human, so the tests **monkeypatch** it:
+
+```python
+# lines 140–145
+def test_prompt_hidden_returns_input(view, monkeypatch):
+    monkeypatch.setattr(getpass, "getpass", lambda prompt: "secret")
+
+    result = view.prompt_hidden("Password:")
+
+    assert result == "secret"
+```
+
+`monkeypatch.setattr(getpass, "getpass", ...)` temporarily replaces the function with a lambda that returns `"secret"` — and pytest reverts it automatically after the test. The second test proves the interrupt path:
+
+```python
+# lines 148–167
+@pytest.mark.parametrize("exception", [KeyboardInterrupt, EOFError])
+def test_prompt_hidden_handles_interrupt(view, monkeypatch, exception):
+    def raise_exception(prompt):
+        raise exception
+
+    monkeypatch.setattr(getpass, "getpass", raise_exception)
+    ...
+    with pytest.raises(SystemExit) as e:
+        view.prompt_hidden("Password:")
+
+    assert e.value.code == 0
+    assert clear_called
+```
+
+This is the study guide's "Mocking & Stubbing" topic applied to `getpass`: fake the I/O boundary, never the logic.
+
+#### b) Unit-testing the Controller — `tests/unit/test_game_controller.py`
+
+At the controller level, the *entire view* is a `Mock`, so `prompt_hidden` is just an attribute you script:
+
+```python
+view.prompt_hidden.return_value = "word"        # one canned answer
+...
+view.prompt_hidden.side_effect = ["bad", "good"] # sequential answers:
+                                                 # first attempt invalid, second valid
+```
+
+The `side_effect` list simulates the real retry loop in `setup_game()`: the first hidden input is rejected by `game.set_word(...)`, the second is accepted. No terminal, no `getpass`, no human — the whole "moderator types a secret word" flow is exercised in milliseconds.
+
+---
+
+### 7. Key takeaways
+
+1. **`getpass.getpass(prompt)` is the standard-library way to read a secret line without echoing it.** It's the same mechanism behind password prompts everywhere in Python.
+2. **Use it only for secrets.** This project uses it exclusively for the word/phrase; everything else uses plain `input()`. Hiding non-sensitive input would just confuse players.
+3. **Keep it in the View.** The only production import of `getpass` is in `console_view.py`. The controller calls `view.prompt_hidden(...)` and the interface guarantees the method exists — so the hiding mechanism is swappable per platform (terminal, GUI, web).
+4. **Wrap it in the same interrupt handling as every other prompt.** `KeyboardInterrupt`/`EOFError` → clear screen, friendly message, `exit(0)`.
+5. **Test it by patching, never by typing.** `monkeypatch.setattr(getpass, "getpass", ...)` in view tests; `view.prompt_hidden.return_value / side_effect` in controller tests.
+
+---
+
+### Quick self‑check (try these to lock it in)
+
+1. In `hangman/view/console_view.py`, find the `import getpass` (line 2) and the `prompt_hidden` method (lines 33–39). Compare it with `prompt` (lines 25–31) and note that the only difference is the call: `input(message)` vs `getpass.getpass(prompt=message)`.
+2. In `hangman/controller/game_controller.py`, find the two `prompt_hidden` call sites (lines 81 and 390) and the nearby plain `prompt` calls (e.g., line 107) — identify which inputs are hidden and which are visible, and why.
+3. In `tests/unit/test_console_view.py`, read `test_prompt_hidden_returns_input` (lines 140–145) and `test_prompt_hidden_handles_interrupt` (lines 148–167), then run `pytest -k prompt_hidden` and confirm both pass with no terminal interaction.
+4. Experiment: temporarily replace `getpass.getpass(prompt=message)` (line 35) with `input(message)`, run `python run.py`, choose manual word entry, and watch the word echo on screen as you type. Revert the change afterwards — that single-line diff is the entire observable effect of this topic.
+
+**One‑line summary:** `getpass.getpass()` reads a line without echoing the characters to the screen, and this project confines it to a single place — `ConsoleView.prompt_hidden()` (console_view.py:35) — so the controller can request the secret word through the View contract (game_controller.py:81, 390) while the hiding mechanism stays swappable per platform and testable by monkeypatching.
