@@ -367,3 +367,232 @@ player.name.upper()   # mypy: "Item 'None' of 'Optional[Player]' has no attribut
 4. Run `mypy hangman/` (Section 8), read at least one reported issue, fix it, and re-run.
 
 **One‑line summary:** Type hints (`name: str`, `-> Dict[str, Any]`, `self.players: List[Player]`) are *advisory* documentation that Python never enforces at runtime — they exist for readers, IDEs, and static checkers like mypy, and in this project they write down the `View` contract, the Model's result-dict API, and the design intent behind dependency injection.
+
+---
+---
+
+## Topic 6.2 — Path Management with `pathlib.Path`
+
+*Based on `docs/masterclass/_study_guide.md` (Section 6, second item) and the actual code in this project.*
+
+### 1. The problem `pathlib` solves
+
+Before `pathlib` (Python 3.4+), file paths were just **strings**, and you manipulated them with `os.path` functions and string concatenation:
+
+```python
+# The old, fragile way
+path = base_dir + "\\data\\word_bank.json"   # breaks on macOS/Linux
+path = os.path.join(base_dir, "data", "word_bank.json")
+if os.path.exists(path):
+    with open(path, "r") as fh: ...
+```
+
+Problems with that approach:
+
+- **Platform-specific separators:** Windows uses `\`, macOS/Linux use `/`. Hardcoding one breaks the other.
+- **Manual string surgery:** getting a parent directory, a filename, or an extension meant calling `os.path.dirname()`, `os.path.basename()`, etc.
+- **No object model:** a path was inert data, not something you could "ask" questions of.
+
+`pathlib.Path` fixes all of this: a path becomes an **object** with methods (`.exists()`, `.open()`, `.parent`, `.resolve()`, ...) and a `/` operator for joining. The object knows how to produce the correct separator for whatever OS it runs on.
+
+This codebase uses `pathlib` in **three places**: `word_repository.py` (the main example), `game_controller.py` (building the path to the word bank), and the test suite (via pytest's `tmp_path` fixture).
+
+---
+
+### 2. `word_repository.py` — the core example
+
+#### a) Importing and accepting flexible input
+
+```python
+# hangman/services/word_repository.py, lines 6–7
+from pathlib import Path
+from typing import Dict, List, Set, Union
+```
+
+```python
+# line 23
+def __init__(self, file_path: Union[str, Path]):
+```
+
+The constructor's type hint `Union[str, Path]` is a deliberate design choice: **callers may pass either a plain string or a `Path` object**. Both are valid:
+
+```python
+WordRepository("data/word_bank.json")          # string — fine
+WordRepository(Path("data/word_bank.json"))    # Path — fine
+```
+
+This is a good API pattern: be flexible in what you accept, be strict in what you store internally.
+
+#### b) Normalizing to an absolute `Path`
+
+```python
+# line 24
+self.file_path = Path(file_path).resolve()
+```
+
+Two things happen here:
+
+1. **`Path(file_path)`** — converts whatever was passed (string or Path) into a `Path` object. If a `Path` is passed, it's simply returned as-is, so this line is safe either way.
+2. **`.resolve()`** — turns it into an **absolute, normalized** path (resolves `..`, `.`, and relative references).
+
+Why this matters: if someone constructs the repository with a *relative* path like `"data/word_bank.json"`, the repository still stores the full absolute path internally. Every later operation (`.exists()`, `.open()`) then works regardless of the current working directory.
+
+#### c) Path methods instead of `os.path` functions
+
+```python
+# lines 44–49
+if not self.file_path.exists():
+    raise FileNotFoundError(f"Word bank file not found: {self.file_path}")
+
+try:
+    with self.file_path.open("r", encoding="utf-8") as fh:
+        data = json.load(fh)
+```
+
+- **`self.file_path.exists()`** replaces `os.path.exists(str(path))`. The path object answers its own question — no string conversion needed.
+- **`self.file_path.open("r", encoding="utf-8")`** replaces `open(str(path), "r")`. `Path.open()` behaves exactly like the built-in `open()`, but you call it *on* the path.
+
+Notice the error message too: `f"Word bank file not found: {self.file_path}"` — a `Path` prints cleanly as a string, so it's safe to embed in messages.
+
+**Old way vs. this codebase:**
+
+| Task | Old way | In `word_repository.py` |
+|---|---|---|
+| Check file exists | `os.path.exists(str(p))` | `self.file_path.exists()` (line 44) |
+| Open file | `open(str(p), "r")` | `self.file_path.open("r", encoding="utf-8")` (line 48) |
+| Normalize | `os.path.abspath(p)` | `Path(p).resolve()` (line 24) |
+
+---
+
+### 3. `game_controller.py` — building the path to the word bank
+
+This is where the **cross-platform joining** benefit shows most clearly.
+
+#### a) Anchoring to the package directory with `__file__`
+
+```python
+# hangman/controller/game_controller.py, lines 5–7
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+```
+
+Let's walk through this step by step with the real file location in this project:
+
+| Step | Result |
+|---|---|
+| `__file__` | `F:\...\project_hangman\hangman\controller\game_controller.py` |
+| `Path(__file__).resolve()` | same, but guaranteed **absolute** (see below) |
+| `.parent` | `F:\...\project_hangman\hangman\controller` |
+| `.parent.parent` | `F:\...\project_hangman\hangman` |
+
+So `BASE_DIR` is the `hangman` package directory. Two details worth understanding:
+
+- **Why `.resolve()` on `__file__`?** Depending on how the program is launched, `__file__` can be *relative* (e.g., `hangman/controller/game_controller.py` when you run `python run.py` from the project root). `.resolve()` guarantees an absolute path, so `BASE_DIR` is correct no matter where the user starts the program from.
+- **Why `.parent.parent`?** The file lives two levels below the package root (`controller/game_controller.py`), so we climb up twice. With `os.path` this would have been the much less readable `os.path.dirname(os.path.dirname(os.path.abspath(__file__)))`.
+
+#### b) Joining paths with the `/` operator
+
+```python
+# line 22
+self.word_repo = WordRepository(BASE_DIR / "data" / "word_bank.json")
+```
+
+The `/` operator is `pathlib`'s replacement for `os.path.join()`. It:
+
+- **inserts the correct separator for the current OS** — on Windows this produces `F:\...\hangman\data\word_bank.json`; on Linux/macOS it would produce `/home/user/.../hangman/data/word_bank.json`. Same source code, both work.
+- **chains naturally**: `BASE_DIR / "data" / "word_bank.json"` reads almost like a sentence.
+- **is type-safe**: `Path / str` returns a `Path`. You can never accidentally produce a malformed string the way you can with `+` concatenation.
+
+The result points to `hangman/data/word_bank.json`, which exists in this repository (alongside `word_bank_long.json`).
+
+**Old way vs. this codebase:**
+
+| Task | Old way | In `game_controller.py` |
+|---|---|---|
+| Package root | `os.path.dirname(os.path.dirname(os.path.abspath(__file__)))` | `Path(__file__).resolve().parent.parent` (line 7) |
+| Join segments | `os.path.join(BASE_DIR, "data", "word_bank.json")` | `BASE_DIR / "data" / "word_bank.json"` (line 22) |
+
+---
+
+### 4. The test suite — `tmp_path` is a `Path` too
+
+`pathlib` isn't only for production code; the tests lean on it heavily. Pytest's built-in `tmp_path` fixture **is a `pathlib.Path`** pointing to a fresh, unique temporary directory per test.
+
+```python
+# tests/unit/test_word_repository.py, lines 11–17
+@pytest.fixture
+def make_json_file(tmp_path):
+    def _make(data, filename="words.json"):
+        file_path = tmp_path / filename
+        file_path.write_text(json.dumps(data), encoding="utf-8")
+        return file_path
+    return _make
+```
+
+Two more `Path` features in action:
+
+- **`tmp_path / filename`** — the same `/` joining, now used to build a path inside the temp directory.
+- **`file_path.write_text(...)`** — a one-liner that creates the file, writes the JSON, and closes it. The old way required `open(path, "w", encoding="utf-8")` plus a `.write()` call.
+
+And the tests pass `Path` objects straight into the repository, which is exactly why the constructor accepts `Union[str, Path]`:
+
+```python
+# lines 75–77
+def test_init_missing_file_raises_error(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        WordRepository(tmp_path / "missing.json")
+```
+
+```python
+# lines 47–51
+@pytest.fixture
+def empty_repo(tmp_path):
+    file_path = tmp_path / "empty.json"
+    file_path.write_text("[]", encoding="utf-8")
+    return WordRepository(file_path)
+```
+
+This is a nice demonstration of the **flexible-in, consistent-out** pattern: the tests hand in `Path` objects, the controller hands in a `Path` built with `/`, and `WordRepository` normalizes everything to an absolute `Path` on line 24.
+
+---
+
+### 5. Why this guarantees cross-platform compatibility
+
+The study guide's key claim is that `pathlib` "guarantees cross-platform operating system compatibility." Concretely, in this codebase:
+
+1. **No hardcoded separators anywhere.** Search the codebase: there is not a single `"\\"` or `"/"` used to *build* a path. Every join goes through `/`, which delegates to the OS.
+2. **Forward slashes are accepted on Windows too.** `Path("data/word_bank.json")` works fine on Windows — `pathlib` normalizes it. So even user-supplied strings with `/` won't break the app.
+3. **`resolve()` + `__file__` anchoring** means the app finds `word_bank.json` whether you launch it from the project root, from inside `hangman/`, or from anywhere else — on any OS.
+
+If the code had used `BASE_DIR + "\\data\\word_bank.json"`, it would work on this Windows machine and silently fail on a Mac. That's the class of bug `pathlib` eliminates.
+
+---
+
+### 6. Pitfalls to keep in mind (beginner notes)
+
+1. **`Path` is not a `str`.** You can't do `path + "suffix"` — that raises `TypeError`. Use `path / "suffix"`. (You *can* convert explicitly with `str(path)` when an API demands a string, but in this codebase that's never necessary.)
+2. **`Path` objects are immutable.** Every operation (`.parent`, `/`, `.resolve()`) returns a **new** `Path`; the original is unchanged. That's why `BASE_DIR / "data"` doesn't modify `BASE_DIR`.
+3. **`.resolve()` on a non-existent path doesn't raise** (in non-strict mode, Python 3.6+). It just makes the path absolute. That's why `WordRepository` can safely call `.resolve()` in `__init__` and then check `.exists()` separately in `_load()` — the two concerns are cleanly separated.
+4. **`__file__` is not guaranteed absolute** — always pair it with `.resolve()` as `game_controller.py` does.
+
+---
+
+### 7. Key takeaways
+
+1. **`pathlib.Path` turns paths from inert strings into objects** with methods: `.exists()`, `.open()`, `.write_text()`, `.parent`, `.resolve()`.
+2. **The `/` operator replaces `os.path.join()`** and is what makes the code cross-platform: `BASE_DIR / "data" / "word_bank.json"` (game_controller.py:22) works identically on Windows, macOS, and Linux.
+3. **`.resolve()` + `__file__`** is the idiomatic way to anchor paths to your project's own location instead of the user's working directory (game_controller.py:7).
+4. **Flexible public API, normalized internals:** `WordRepository` accepts `Union[str, Path]` (word_repository.py:23) but always stores `Path(file_path).resolve()` (line 24) — so every consumer gets consistent, absolute paths.
+5. **The pattern extends to tests:** pytest's `tmp_path` fixture is a `Path`, and `write_text()` makes test-file setup a one-liner (test_word_repository.py:14–15).
+
+---
+
+### Quick self‑check (try these to lock it in)
+
+1. In `hangman/services/word_repository.py`, find the `from pathlib import Path` import (line 6) and the `Union[str, Path]` hint (line 23). In a scratch copy, construct the repository with a plain string and with a `Path` and confirm both work.
+2. In `hangman/controller/game_controller.py`, trace `BASE_DIR` (line 7) step by step: print `Path(__file__).resolve()`, then `.parent`, then `.parent.parent`, and confirm that `BASE_DIR / "data" / "word_bank.json"` (line 22) points to `hangman/data/word_bank.json`.
+3. In `tests/unit/test_word_repository.py`, find every use of `tmp_path` (lines 12, 48, 75, 80) and identify the `Path` methods used (`/` joining, `.write_text()`).
+4. Experiment: temporarily replace line 22 of `game_controller.py` with the old-style `os.path.join(BASE_DIR, "data", "word_bank.json")` and line 48 of `word_repository.py` with `open(str(self.file_path), "r")` — the app will still work on Windows, but you'll feel exactly how much more fragile and verbose the string-based approach is.
+
+**One‑line summary:** `pathlib.Path` turns file paths from fragile strings into objects — join with `/` (`BASE_DIR / "data" / "word_bank.json"`), anchor with `Path(__file__).resolve().parent.parent`, and call `.exists()`/`.open()`/`.write_text()` on the path itself — so the same code works on Windows, macOS, and Linux without a single hardcoded separator.
