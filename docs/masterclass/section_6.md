@@ -817,3 +817,416 @@ The `side_effect` list simulates the real retry loop in `setup_game()`: the firs
 4. Experiment: temporarily replace `getpass.getpass(prompt=message)` (line 35) with `input(message)`, run `python run.py`, choose manual word entry, and watch the word echo on screen as you type. Revert the change afterwards — that single-line diff is the entire observable effect of this topic.
 
 **One‑line summary:** `getpass.getpass()` reads a line without echoing the characters to the screen, and this project confines it to a single place — `ConsoleView.prompt_hidden()` (console_view.py:35) — so the controller can request the secret word through the View contract (game_controller.py:81, 390) while the hiding mechanism stays swappable per platform and testable by monkeypatching.
+
+---
+
+---
+
+## Topic 6.4 — Module Initialization & Run Execution
+
+*Based on `docs/masterclass/_study_guide.md` (Section 6, fourth item) and the actual code in this project.*
+
+### 1. What the study guide says
+
+> **Module Initialization & Run Execution:**
+> *Leveraging package-level imports via `__init__.py` and segregating the application runner (`if __name__ == "__main__":` entrypoint in `run.py`).*
+
+That one bullet actually contains **two distinct mechanisms** that work together:
+
+| Mechanism | Question it answers | Where in this project |
+|---|---|---|
+| **Package initialization** (`__init__.py`) | *"How does Python know a folder is a package, and what runs when the package is first imported?"* | `hangman/__init__.py` + 3 subpackage `__init__.py` files (all empty) |
+| **Run execution** (`if __name__ == "__main__":`) | *"When does the program actually start, and how can the same file be imported without starting?"* | `run.py` (13 lines) + `tests/integration/test_run.py` |
+
+The payoff of combining them: **the game can be launched by a human (`python run.py`) and dissected by a test suite (`import run`) using the exact same file.** That duality is the whole design story of this topic.
+
+---
+
+### 2. The map — where each piece lives
+
+```
+project_hangman/
+├── run.py                      ← THE entrypoint (top-level script, NOT inside a package)
+├── pytest.ini                  ← [pytest] pythonpath = .   (makes `import run` work in tests)
+├── hangman/                    ← top-level package
+│   ├── __init__.py             ← empty (0 lines)
+│   ├── constants.py            ← MAX_HEALTH, HANGMAN frames, ...
+│   ├── data/
+│   │   ├── word_bank.json
+│   │   └── word_bank_long.json
+│   ├── model/
+│   │   ├── __init__.py         ← empty
+│   │   ├── game.py             ← `from .player import Player`        (relative import)
+│   │   └── player.py
+│   ├── view/
+│   │   ├── __init__.py         ← empty
+│   │   ├── view_interface.py   ← the 8-method View contract
+│   │   └── console_view.py     ← `from .view_interface import View`  (relative import)
+│   ├── controller/
+│   │   ├── __init__.py         ← empty
+│   │   └── game_controller.py  ← absolute imports (lines 1–3)
+│   └── services/
+│       └── word_repository.py  ← ⚠ no __init__.py here (see §4.4)
+└── tests/
+    ├── unit/...
+    └── integration/test_run.py ← `import run as run_module` + runpy
+```
+
+Two structural facts drive everything below:
+
+1. **`run.py` sits *outside* the `hangman` package.** It is a plain top-level script. That's why it can only use *absolute* imports (`from hangman.view.console_view import ...`) — relative imports (`from .x import y`) only exist *inside* a package.
+2. **Every module inside `hangman/` is reachable by a dotted path** (`hangman.model.game`, `hangman.view.console_view`, ...) because each directory is marked as a package by an `__init__.py`.
+
+---
+
+### 3. Part A — Package initialization: what `__init__.py` actually does
+
+#### a) The three jobs of `__init__.py`
+
+When Python encounters `import hangman` (or any import that passes through `hangman`), it:
+
+1. **Recognizes the directory as a package.** A folder with an `__init__.py` is a *regular package*. Without the file it would be a *namespace package* (PEP 420, Python 3.3+) — still importable, but with different, looser semantics.
+2. **Executes `__init__.py` exactly once** (the first time, per process). Whatever code you put there runs *at import time*, before the importing module continues.
+3. **Becomes the package's "front door."** Common uses: re-exporting the public API (`from .game import Game` so users can write `from hangman.model import Game`), defining `__all__`, or initializing package-level state.
+
+#### b) This project's choice: empty marker files
+
+All four `__init__.py` files in this codebase are **completely empty** (0 lines):
+
+```
+hangman/__init__.py            → empty
+hangman/model/__init__.py      → empty
+hangman/view/__init__.py       → empty
+hangman/controller/__init__.py → empty
+```
+
+Empty is a *deliberate* minimalist style, and it has three consequences you can verify in the code:
+
+- **No import-time side effects.** Importing `hangman` never runs game logic, never touches the file system, never prints anything. Imports stay fast and side-effect-free.
+- **No re-exports.** Because nothing is re-exported, every import in the codebase must name the *full module path*. Compare what you see everywhere:
+  ```python
+  # run.py, line 1 — full path to the module
+  from hangman.view.console_view import ConsoleView
+  ```
+  You will *not* find `from hangman.view import ConsoleView` anywhere — that would require a re-export in `hangman/view/__init__.py`, which doesn't exist.
+- **No circular-import risk from the package layer.** Circular imports usually start when `__init__.py` files eagerly import submodules. With empty files, that failure mode simply doesn't exist.
+
+#### c) What "executed once" means — the `sys.modules` cache
+
+Every module Python executes is cached in `sys.modules` under its dotted name. Look at who imports `ConsoleView`:
+
+```python
+# run.py, line 1
+from hangman.view.console_view import ConsoleView
+
+# hangman/controller/game_controller.py, line 2
+from hangman.view.console_view import ConsoleView
+```
+
+Two import statements, but `console_view.py` is **executed exactly once** per process. The second import just looks up the already-cached module in `sys.modules` and grabs the `ConsoleView` attribute from it. This caching is also why the integration tests can patch *one* place and affect *all* importers (see §5.4).
+
+#### d) The anomaly: `hangman/services/` has no `__init__.py`
+
+If you list the tree carefully, `hangman/services/` contains only `word_repository.py` — **no `__init__.py`**. Yet this import works perfectly:
+
+```python
+# hangman/controller/game_controller.py, line 3
+from hangman.services.word_repository import WordRepository
+```
+
+Why? Because Python 3 falls back to treating `services/` as a **namespace package** (PEP 420). It's importable, but it's *inconsistent* with the other four subpackages that all have explicit (empty) `__init__.py` files. This is a classic "real codebase" wart: nothing is broken, but a linter or a future teammate would expect the marker file. Adding an empty `hangman/services/__init__.py` is a safe, zero-risk consistency fix — a good first exercise.
+
+#### e) Relative vs. absolute imports — both styles, in one project
+
+The codebase uses **both** import styles, and each appears where it makes sense:
+
+| Style | Example | Where |
+|---|---|---|
+| **Relative** (`.` = "my own package") | `from .view_interface import View` | `console_view.py` line 5 |
+| **Relative** | `from .player import Player` | `game.py` line 5 |
+| **Absolute** (from project root) | `from hangman.model.game import Game` | `game_controller.py` line 1 |
+| **Absolute** | `from hangman.view.console_view import ConsoleView` | `game_controller.py` line 2, `run.py` line 1 |
+| **Package-level** (submodule *through* the package) | `from hangman import constants` | `run.py` line 3 |
+
+Notes for a beginner:
+
+- **Relative imports only work inside a package.** `run.py` is top-level, so it *must* use absolute imports — there is no "current package" for a `.` to refer to.
+- **`from hangman import constants`** (run.py line 3) is the "package-level import" the study guide mentions. It imports the *submodule* `constants` through the package and binds the name `constants` in `run.py`'s namespace, so line 8 can write `constants_module=constants`. (The alternative `import hangman.constants` would bind only the name `hangman`, forcing `hangman.constants.MAX_HEALTH` everywhere.)
+- **Relative imports survive package renames.** If you renamed `hangman/` to `hangman2/`, the two relative imports keep working untouched; the absolute ones would all need editing. Absolute imports are more explicit; relative ones are more robust. Both are idiomatic — the project just mixes them.
+
+---
+
+### 4. Part B — `run.py`: the segregated application runner
+
+#### a) The whole file (13 lines)
+
+```python
+# run.py
+from hangman.view.console_view import ConsoleView        # line 1
+from hangman.controller.game_controller import GameController  # line 2
+from hangman import constants                            # line 3
+
+
+def run():                                               # line 6
+        view = ConsoleView()                             # line 7
+        controller = GameController(view=view, constants_module=constants)  # line 8
+        controller.start()                               # line 9
+
+
+if __name__ == "__main__":                               # line 12
+    run()                                                # line 13
+```
+
+Every line of this file is a design decision. Let's take them apart.
+
+#### b) The `__name__` mechanism — the core of "run execution"
+
+Every Python module has a built-in attribute `__name__`:
+
+- When a file is **executed directly** (`python run.py`), Python sets its `__name__` to the string `"__main__"`.
+- When a file is **imported** (`import run`), its `__name__` is its module name — `"run"`.
+
+So the guard on line 12:
+
+```python
+if __name__ == "__main__":
+    run()
+```
+
+means: *"start the game only if I am the program the user asked to run — not if I am merely being imported."*
+
+The two execution paths through the same file:
+
+| | `python run.py` | `import run` (as in tests) |
+|---|---|---|
+| `__name__` | `"__main__"` | `"run"` |
+| Lines 1–3 (imports) | execute | execute |
+| Line 6 (`def run():`) | defines the function | defines the function |
+| Line 12 guard | **True → `run()` executes → game starts** | **False → nothing happens** |
+| Side effects | full interactive game | none — silent, instant import |
+
+That second column is the entire reason the guard exists: **it makes the entrypoint import-safe.** Without it, the moment a test did `import run`, the game would boot and block waiting for keyboard input.
+
+#### c) Why wrap the startup in a `run()` function instead of writing it under the guard?
+
+You *could* write:
+
+```python
+if __name__ == "__main__":
+    view = ConsoleView()
+    controller = GameController(view=view, constants_module=constants)
+    controller.start()
+```
+
+and it would work for a human. But the project deliberately factors out `run()` (line 6) for four reasons:
+
+1. **Testability.** The integration tests call `run_module.run()` directly (test_run.py lines 66, 72, 86, 125, 179) with mocked dependencies. A bare guard block would be untestable in isolation.
+2. **The guard becomes a one-liner.** "When to start" (the guard) and "what to start" (the function body) are separated — each is trivially readable.
+3. **Reusability.** Any other launcher (a `python -m` script, a GUI wrapper, a demo harness) can call `run()` without duplicating the wiring.
+4. **It marks the composition root.** `run()` is the *only* place in the entire codebase that instantiates concrete classes and wires them together:
+
+   ```python
+   view = ConsoleView()
+   controller = GameController(view=view, constants_module=constants)
+   ```
+
+   This is the "segregating the application runner" half of the study guide's bullet. Every other module is wiring-agnostic: the controller receives its view and constants *by injection* (its constructor, `game_controller.py` line 16: `def __init__(self, view: ConsoleView, constants_module):`), the model knows nothing about views, and the view knows nothing about the model. Only `run.py` knows that *this* game uses *this* console view. Swap in a `TkinterView` later and the diff is confined to `run.py`.
+
+#### d) Why `python run.py` can find the `hangman` package at all
+
+When you run `python run.py`, Python automatically puts **the directory containing the script** (the project root) at the front of `sys.path`. That's what makes `from hangman.view.console_view import ConsoleView` resolvable — `hangman/` is a sibling of `run.py`.
+
+The test suite needs the same fact, but pytest doesn't run `run.py` as a script, so the project supplies it explicitly in `pytest.ini`:
+
+```ini
+[pytest]
+pythonpath = .
+```
+
+`pythonpath = .` tells pytest (≥ 7) to prepend the project root to `sys.path` before collecting tests. That single line is what makes `import run as run_module` (test_run.py line 3) and `import hangman...` work in every test file, no matter where pytest is launched from.
+
+---
+
+### 5. The full execution trace of `python run.py`
+
+Walking through what the interpreter actually does, in order:
+
+1. **Create the `__main__` module** and start executing `run.py` top to bottom.
+2. **Line 1** — `from hangman.view.console_view import ConsoleView`:
+   - `hangman` not in `sys.modules` → execute `hangman/__init__.py` (empty) → cache as `hangman`.
+   - `hangman.view` not cached → execute `hangman/view/__init__.py` (empty) → cache.
+   - Execute `hangman/view/console_view.py`. Its line 5 (`from .view_interface import View`) triggers execution of `hangman/view/view_interface.py` first (defines `View`), then `ConsoleView` is defined.
+3. **Line 2** — `from hangman.controller.game_controller import GameController`:
+   - `hangman` already cached → **not re-executed**.
+   - Execute `hangman/controller/__init__.py` (empty).
+   - Execute `hangman/controller/game_controller.py`, whose own imports cascade:
+     - line 1 → `hangman/model/__init__.py` (empty), then `game.py`, whose line 5 (`from .player import Player`) executes `player.py` first;
+     - line 2 → `console_view` already cached, just re-binds the name;
+     - line 3 → `hangman/services/` (namespace package, no `__init__.py`) → executes `word_repository.py`.
+   - Module-level line 7 also runs: `BASE_DIR = Path(__file__).resolve().parent.parent` — a harmless import-time computation (see §6, pitfall 6).
+4. **Line 3** — `from hangman import constants` → executes `hangman/constants.py` (defines `MAX_HEALTH`, the `HANGMAN` ASCII frames, ...).
+5. **Line 6** — `def run():` merely *defines* the function object. Its body does not run yet.
+6. **Line 12** — `__name__` is `"__main__"` → guard is **True** → `run()` executes:
+   - line 7: `view = ConsoleView()`;
+   - line 8: `controller = GameController(view=view, constants_module=constants)` — note the constructor *also* builds `WordRepository(BASE_DIR / "data" / "word_bank.json")` (game_controller.py line 22), which reads and validates the JSON word bank;
+   - line 9: `controller.start()` (game_controller.py line 361) → `setup_game()` → the interactive game begins.
+
+Contrast with `import run`: steps 2–5 are identical, but step 6's guard is **False** — the import finishes silently with the game never started. *Same file, two behaviors, decided by one string comparison.*
+
+---
+
+### 6. Part C — "Run execution" in the test suite (`tests/integration/test_run.py`)
+
+The study guide's Section 5 promises this:
+
+> *Simulating the entrypoint (`run.py`) in `test_run.py` using `runpy` to test system initialization and coordinate module configurations under simulated execution blocks.*
+
+Here is how the file delivers on that, test by test.
+
+#### a) Importing the entrypoint — `import run as run_module` (line 3)
+
+```python
+import run as run_module
+```
+
+This works because of `pythonpath = .` in `pytest.ini`, and it is *safe* because of the `__main__` guard: importing `run` executes only the imports and the `def run():` — no game, no prompts, no blocking. The guard is what converts the entrypoint from "a program" into "a testable module."
+
+#### b) The core wiring tests (lines 65–88)
+
+The `patched_dependencies` fixture (lines 41–58) replaces the names *inside `run.py`'s namespace* with mocks:
+
+```python
+monkeypatch.setattr(run_module, "ConsoleView", mock_view_class)
+monkeypatch.setattr(run_module, "GameController", mock_controller_class)
+```
+
+Then three tests verify the composition root's contract:
+
+```python
+def test_run_creates_view_instance(patched_dependencies):
+    run_module.run()
+    patched_dependencies["view_class"].assert_called_once_with()
+```
+
+```python
+def test_run_creates_controller_with_correct_dependencies(patched_dependencies):
+    run_module.run()
+    ...
+    assert kwargs["view"] is patched_dependencies["view_instance"]
+    assert kwargs["constants_module"] is run_module.constants
+```
+
+```python
+def test_run_calls_controller_start(patched_dependencies):
+    run_module.run()
+    patched_dependencies["controller_instance"].start.assert_called_once_with()
+```
+
+Together they pin down exactly what `run()` must do: construct the view, inject it (plus the `constants` module) into the controller, and call `start()`. If someone "improves" `run.py` and forgets the `constants_module` argument, `test_run_creates_controller_with_correct_dependencies` fails immediately.
+
+#### c) Execution order (lines 95–131)
+
+`test_run_execution_order` records the sequence with side-effect functions and asserts the exact order:
+
+```python
+assert call_order == [
+    "view_created",
+    "controller_created",
+    "start_called"
+]
+```
+
+This freezes the lifecycle: **view first, then controller (which needs the view), then start.**
+
+#### d) Exception propagation (lines 138–179)
+
+```python
+@pytest.mark.parametrize("exception_stage", ["view", "controller", "start"])
+def test_run_propagates_exceptions(mocker, monkeypatch, exception_stage):
+    ...
+    with pytest.raises(RuntimeError):
+        run_module.run()
+```
+
+One test, three stages: a failure while constructing the view, while constructing the controller, or inside `start()` must **bubble out of `run()`** — the entrypoint must never silently swallow errors. (Compare with the view's own prompts, which *do* catch `KeyboardInterrupt`/`EOFError` on purpose — that's topic 6.5's territory.)
+
+#### e) The `__main__` path itself — `test_main_executes_run` (lines 186–211)
+
+This is the most instructive test in the file, because it exercises the guard:
+
+```python
+def test_main_executes_run(monkeypatch, mocker):
+    mock_controller = mocker.Mock()
+    mock_controller.start = mocker.Mock()
+    mock_controller_class = mocker.Mock(return_value=mock_controller)
+    mock_view_class = mocker.Mock()
+
+    # Patch ORIGINAL import sources
+    monkeypatch.setattr(
+        "hangman.controller.game_controller.GameController",
+        mock_controller_class
+    )
+    monkeypatch.setattr(
+        "hangman.view.console_view.ConsoleView",
+        mock_view_class
+    )
+
+    runpy.run_module("run", run_name="__main__")
+
+    mock_controller.start.assert_called_once()
+```
+
+Three mechanisms are at work:
+
+1. **`runpy.run_module("run", run_name="__main__")`** re-executes `run.py` in a *fresh* module namespace with `__name__` forced to `"__main__"` — i.e., it simulates `python run.py` without spawning a subprocess. The `run_name` argument is the key: by default `runpy` would set `__name__` to `"run"`, which would make the guard false and the test meaningless.
+2. **Why patch the *source* modules, not `run_module`'s attributes?** Because `runpy` re-executes the file from scratch, re-running lines 1–2:
+   ```python
+   from hangman.view.console_view import ConsoleView
+   from hangman.controller.game_controller import GameController
+   ```
+   Those `from ... import ...` statements re-bind the names in the *new* namespace by reading the attributes off the (already cached) source modules. If the test had patched only `run_module.ConsoleView`, the re-execution would have overwritten the mock with the real class. Patching `hangman.view.console_view.ConsoleView` at the source means the re-executed import picks up the mock. (This is the `sys.modules` caching from §3c working *for* the test.)
+3. **The assertion** — `mock_controller.start.assert_called_once()` — proves the complete chain: guard fired → `run()` ran → view built → controller built → `start()` called. The entire "run execution" path, verified in milliseconds with no terminal.
+
+---
+
+### 7. Why this design is good (best-practice summary)
+
+1. **Single, segregated entrypoint.** One file, one command (`python run.py`), one place that knows the concrete classes. The rest of the codebase is wiring-agnostic — the direct payoff of the DI design from Section 1 of the guide.
+2. **Import-safe by construction.** The `__main__` guard makes the entrypoint a first-class importable module, which is what makes the whole integration test suite possible.
+3. **Minimal package initialization.** Empty `__init__.py` files = zero import-time side effects, zero re-export magic, zero circular-import surface. The package structure is visible in the import paths instead of hidden in `__init__` files.
+4. **The test suite mirrors the architecture.** `test_run.py` tests exactly the seams this topic creates: the wiring in `run()`, the order of construction, exception propagation, and the `__main__` guard itself.
+
+---
+
+### 8. Pitfalls & beginner notes
+
+1. **Importing executes.** Any top-level code in a module runs at import time. The guard exists precisely to keep the *game-starting* code out of the import path. If `run.py` had a bare top-level `view = ConsoleView()`, every `import run` would construct a view.
+2. **`__init__.py` runs at import time too.** Heavy work there (reading files, connecting to services) slows *every* import and is the classic source of circular-import bugs. Empty files sidestep both.
+3. **The missing `hangman/services/__init__.py`.** It works (namespace package, PEP 420) but is inconsistent with the other four subpackages. Adding an empty file is a safe consistency fix.
+4. **`run()`'s body is indented 8 spaces** (run.py lines 7–9) instead of the PEP 8 standard 4. It's *valid* Python — indentation just has to be consistent within a block — but a formatter like `black` would normalize it.
+5. **`from hangman import constants` vs `import hangman.constants`.** The former binds the name `constants` (used on line 8); the latter binds only `hangman`, forcing `hangman.constants.MAX_HEALTH` style access. Both trigger identical execution.
+6. **Module-level code in `game_controller.py`** — `BASE_DIR = Path(__file__).resolve().parent.parent` (line 7) — runs at import time. Harmless here (pure path computation), but a reminder that *any* top-level statement is an import-time side effect.
+7. **Each module executes exactly once per process** (`sys.modules` caching). That's why `console_view.py` is imported by both `run.py` and `game_controller.py` yet runs only once — and why patching a name at its source module affects all importers (see §6e).
+
+---
+
+### 9. Key takeaways
+
+1. **`__init__.py` marks a directory as a package and runs once at first import.** This project keeps all four of them *empty*: pure markers, no side effects, no re-exports — so every import names the full module path (`from hangman.view.console_view import ConsoleView`).
+2. **`hangman/services/` is the odd one out** — no `__init__.py`, working as a PEP 420 namespace package. Inconsistent, not broken.
+3. **`if __name__ == "__main__":` is what makes a file dual-natured:** executed directly → `__name__ == "__main__"` → the game starts; imported → `__name__ == "run"` → only definitions happen. The guard is the entire reason `import run` is safe.
+4. **`run()` is the composition root:** the only place that instantiates `ConsoleView` and `GameController` and injects the `constants` module (run.py lines 7–8). Factoring it into a function (instead of inlining under the guard) is what makes it testable and reusable.
+5. **`pythonpath = .` in `pytest.ini`** puts the project root on `sys.path` for tests, mirroring what `python run.py` does automatically for the script.
+6. **`test_run.py` verifies the whole topic:** wiring (lines 65–88), construction order (lines 95–131), exception propagation (lines 138–179), and the `__main__` guard via `runpy.run_module("run", run_name="__main__")` (lines 186–211) — patching the *source* modules because `runpy` re-executes the imports.
+
+---
+
+### Quick self‑check (try these to lock it in)
+
+1. **Feel the guard.** In a scratch copy of `run.py`, delete the `if __name__ == "__main__":` line and call `run()` unconditionally at the top level. Then run `pytest tests/integration/test_run.py` and watch the tests break — the game now starts at *import* time. Restore the guard and watch them pass again.
+2. **See `__init__.py` execute.** Add `print("hangman package initialized")` to `hangman/__init__.py` and run `python run.py`. It prints exactly once, before anything else — even though `run.py` never mentions `__init__.py`. Then add the same print to `hangman/view/__init__.py` and observe the order of the two lines.
+3. **Try the re-export pattern.** In a scratch copy, add `from .console_view import ConsoleView` to `hangman/view/__init__.py` and change run.py line 1 to `from hangman.view import ConsoleView`. It works — now you understand why the project *chose not to* do this (no re-exports, full paths everywhere).
+4. **Fix the anomaly.** Create an empty `hangman/services/__init__.py`, run the full test suite, and confirm nothing changes. You've just made the package structure uniform.
+5. **Trace the path.** Run `python run.py` from the project root, then from a completely different directory using the full file path (`python "F:\...\project_hangman\run.py"`). Both work — print `sys.path[0]` at the top of `run.py` to see *why* (it's the script's directory, not your current directory).
+
+**One‑line summary:** Empty `__init__.py` files mark `hangman/` as a side-effect-free package whose modules are imported by full dotted path, while `run.py` — the sole composition root — uses `if __name__ == "__main__":` to start the game only when executed directly, so the very same file can be imported by `test_run.py` (with `pythonpath = .` and `runpy.run_module(..., run_name="__main__")`) to verify the wiring, the order, and the guard itself.
